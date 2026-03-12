@@ -1,6 +1,7 @@
 # 角色对战系统
 **本项目为@resona创建**
 欢迎访问我的GitHub主页：https://github.com/resonaaaaa
+如果你喜欢这个项目，请给我一个star！谢谢支持！😊
 
 ## 项目简介
 这是一个基于Python的角色对战系统，允许用户创建角色并进行战斗
