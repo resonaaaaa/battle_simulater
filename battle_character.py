@@ -569,6 +569,15 @@ class Druid(Character):
         self.tree_spirit_blessing_active = False
         self.learn_skill("nature_summon", self.nature_summon, "随机召唤自然生物协助战斗，最多2个。")
         self.learn_skill("tree_spirit_blessing", self.tree_spirit_blessing, "提升防御3次自身行动回合。")
+        if level > 1:
+            self.gain_levels(level - 1, announce=False)
+            self.health = self.maxHP
+            self.nature_summon_count = 0
+            self.summons = {key: False for key in self.summons}
+            self.summons_on_field = []
+            self.tree_spirit_blessing_active = False
+            self.tree_spirit_blessing_turns = 0
+            self.treant_max_hp = int(self.maxHP * 0.2)
 
     def is_skill_available(self, skill_name):
         if skill_name == "nature_summon":
@@ -587,6 +596,8 @@ class Druid(Character):
         self.summons[summon] = True
         self.nature_summon_count += 1
         self.summons_on_field.append(summon)
+        if summon == 'treant':
+            self.treant_max_hp = int(self.maxHP * 0.2)
         print(f"{self.name} 召唤了一个 {summon} 来协助战斗！当前召唤数量：{self.nature_summon_count}")
 
     def tree_spirit_blessing(self):
@@ -651,6 +662,9 @@ class Druid(Character):
         self.maxHP += 12
         self.attack += 9
         self.defense += 4
+        # 树人基础生命保持为最大生命值的 20%，不引入额外成长倍率。
+        if 'treant' not in self.summons_on_field:
+            self.treant_max_hp = int(self.maxHP * 0.2)
 
     def settlement(self):
         super().settlement()
