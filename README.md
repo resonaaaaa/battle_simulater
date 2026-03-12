@@ -6,7 +6,13 @@
 ## 项目简介
 这是一个基于Python的角色对战系统，允许用户创建角色并进行战斗
 本系统有多个可选角色，每个角色都有独特的技能和属性
-点击运行压缩包中的battle_simulator.exe即可体验角色对战!
+点击运行文件夹中的battle_simulator.exe即可体验角色对战!
+
+## 自定义
+- 你可以通过编辑`battle_character.py`文件来创建和修改角色
+- 每个角色都继承自`Character`类，你可以重写其中的方法来实现不同的技能和效果，创建自定义角色。
+- 在修改'battle_character.py'后，请记得更新用于实现GUI的'battle_gui.py'文件中的角色列表，以便在界面上选择新角色。
+- 完成上述工作后，运行用于创建exe文件的'build_exe.bat'文件来生成新的exe文件。
 
 ## 角色介绍
 ### 1.狂战士Berserker
