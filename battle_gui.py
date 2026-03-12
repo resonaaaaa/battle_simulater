@@ -15,6 +15,7 @@ CHARACTER_TYPES = {
     "FlameWitch": battle_character.FlameWitch,
     "Mermaid": battle_character.Mermaid,
     "WolfMan": battle_character.WolfMan,
+    "Druid": battle_character.Druid,
 }
 
 
@@ -82,6 +83,9 @@ class BattleApp(tk.Tk):
 
         clear_btn = ttk.Button(tool_bar, text="清空日志", command=self.clear_log)
         clear_btn.pack(side="left", padx=8)
+
+        skill_desc_btn = ttk.Button(tool_bar, text="查看技能描述", command=self.show_skill_descriptions)
+        skill_desc_btn.pack(side="left", padx=8)
 
         self.winner_label = ttk.Label(tool_bar, text="胜者: -", font=("Microsoft YaHei UI", 10, "bold"))
         self.winner_label.pack(side="right")
@@ -156,6 +160,8 @@ class BattleApp(tk.Tk):
             lines.append(f"rage: {int(getattr(char, 'rage', 0))}")
         if hasattr(char, "rage_flag"):
             lines.append(f"rage_flag: {bool(getattr(char, 'rage_flag', False))}")
+        if hasattr(char, "rage_buff_turns") and getattr(char, "rage_flag", False):
+            lines.append(f"rage_turns: {int(getattr(char, 'rage_buff_turns', 0))}")
         if hasattr(char, "MP") and hasattr(char, "maxMP"):
             lines.append(f"MP: {int(char.MP)}/{int(char.maxMP)}")
         if hasattr(char, "bat_count"):
@@ -164,13 +170,72 @@ class BattleApp(tk.Tk):
             lines.append(
                 f"dragon_breath: {int(char.dragon_breath)}/{int(char.max_dragon_breath)}"
             )
+        if hasattr(char, "attack_buff_flag"):
+            lines.append(f"attack_buff: {bool(getattr(char, 'attack_buff_flag', False))}")
+        if hasattr(char, "attack_buff_turns") and getattr(char, "attack_buff_flag", False):
+            lines.append(f"attack_buff_turns: {int(getattr(char, 'attack_buff_turns', 0))}")
         if hasattr(char, "remaining_songs"):
             lines.append(f"remaining_songs: {int(getattr(char, 'remaining_songs', 0))}")
         if hasattr(char, "wolf_evolution_flag"):
             lines.append(f"wolf_form: {bool(getattr(char, 'wolf_evolution_flag', False))}")
-        if hasattr(char, "shield_block_chance"):
-            lines.append(f"block_chance: {getattr(char, 'shield_block_chance', 0):.0%}")
+        if hasattr(char, "counterattack_chance"):
+            lines.append(f"counter_chance: {getattr(char, 'counterattack_chance', 0):.0%}")
+        if hasattr(char, "nature_summon_count") and hasattr(char, "nature_summon_limit"):
+            lines.append(
+                f"summon_count: {int(char.nature_summon_count)}/{int(char.nature_summon_limit)}"
+            )
+        if hasattr(char, "summons_on_field"):
+            summons = ", ".join(char.summons_on_field) if char.summons_on_field else "none"
+            lines.append(f"summons: {summons}")
+        if hasattr(char, "treant_max_hp") and getattr(char, "summons", {}).get("treant", False):
+            lines.append(f"treant_hp: {int(getattr(char, 'treant_max_hp', 0))}")
+        if hasattr(char, "tree_spirit_blessing_active"):
+            lines.append(
+                f"tree_blessing: {bool(getattr(char, 'tree_spirit_blessing_active', False))}"
+            )
+        if hasattr(char, "tree_spirit_blessing_turns") and getattr(char, "tree_spirit_blessing_active", False):
+            lines.append(
+                f"tree_blessing_turns: {int(getattr(char, 'tree_spirit_blessing_turns', 0))}"
+            )
         return lines
+
+    def _format_skill_description_for_role(self, role_name, preview_name, level):
+        try:
+            char = create_character(role_name, preview_name, level)
+            descriptions = char.get_skill_descriptions()
+        except Exception as exc:
+            return f"[{role_name}] 技能读取失败: {exc}\n"
+
+        lines = [f"[{role_name}] 技能说明"]
+        for skill_name in char.skills.keys():
+            desc = descriptions.get(skill_name, "暂无描述")
+            lines.append(f"- {skill_name}: {desc}")
+        return "\n".join(lines) + "\n"
+
+    def show_skill_descriptions(self):
+        left_text = self._format_skill_description_for_role(
+            self.p1_role.get(),
+            self.p1_name.get().strip() or "P1",
+            int(self.p1_level.get()),
+        )
+        right_text = self._format_skill_description_for_role(
+            self.p2_role.get(),
+            self.p2_name.get().strip() or "P2",
+            int(self.p2_level.get()),
+        )
+
+        window = tk.Toplevel(self)
+        window.title("技能描述")
+        window.geometry("760x520")
+
+        text = tk.Text(window, wrap="word", font=("Microsoft YaHei UI", 10))
+        text.pack(side="left", fill="both", expand=True)
+        scroll = ttk.Scrollbar(window, orient="vertical", command=text.yview)
+        scroll.pack(side="right", fill="y")
+        text.configure(yscrollcommand=scroll.set)
+
+        text.insert("1.0", left_text + "\n" + right_text)
+        text.configure(state="disabled")
 
     def _format_status_text(self, char, role_name):
         base = [
@@ -365,6 +430,7 @@ class BattleApp(tk.Tk):
 
         log_stream = io.StringIO()
         with redirect_stdout(log_stream):
+            actor.on_turn_start()
             if self.verbose_var.get():
                 print(f"\n第 {bs.turn + 1} 回合：{actor.name} 使用了技能 '{call_name}'")
             try:
