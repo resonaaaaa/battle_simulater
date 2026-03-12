@@ -121,8 +121,6 @@ class BattleSystem:
 				winner.settlement()  #重置状态以准备下一场战斗
 		return winner
 
-
-
 def demo():
 	
 	print("正在创建两个测试角色...")
