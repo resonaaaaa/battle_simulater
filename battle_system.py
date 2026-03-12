@@ -11,10 +11,12 @@ def build_skill_call(actor, skill_name, opponent):
 	skill = actor.skills.get(skill_name)
 	if skill is None:
 		return skill_name, (), {}
+	if not callable(skill):
+		return "attack", (opponent,), {}
 
 	try:
 		sig = inspect.signature(skill)
-	except ValueError:
+	except (ValueError, TypeError):
 		# 内置或特殊可调用对象，默认传入对手
 		return skill_name, (opponent,), {}
 
@@ -89,6 +91,7 @@ class BattleSystem:
 		while self.char1.is_alive() and self.char2.is_alive() and self.turn < 100:  # 增加回合限制以防止死循环
 			actor = self.char1 if self.turn % 2 == 0 else self.char2
 			opponent = self.char2 if actor is self.char1 else self.char1
+			actor.on_turn_start()
 			strat = strat1 if actor is self.char1 else strat2
 			strat = strat or default_strategy
 			name, args, kwargs = strat(actor, opponent)
@@ -123,8 +126,8 @@ class BattleSystem:
 def demo():
 	
 	print("正在创建两个测试角色...")
-	bers = battle_character.Berserker("Heracles", level=31)
-	witch = battle_character.FlameWitch("Circe", level=31)
+	bers = battle_character.WolfMan("Heracles", level=31)
+	witch = battle_character.Mermaid("Circe", level=31)
 	bs = BattleSystem(bers, witch)
 	
 	mode = input("选择模式：自动(a) / 手动(m) [a/m]: ").strip().lower()

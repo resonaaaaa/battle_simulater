@@ -1,3 +1,5 @@
+import random
+
 class Character:
     def __init__(self, name, level,maxHP,attack, defense):
         self.name = name
@@ -9,6 +11,7 @@ class Character:
         
         # 默认拥有基础攻击技能
         self.skills = {"attack": self.attack_target}
+        self.skill_descriptions = {"attack": "普通攻击，造成基于攻击与目标防御计算的物理伤害。"}
 
         # 仅基础 Character 在这里直接补齐等级；子类会在各自 __init__ 末尾处理
         if self.__class__ is Character and level > 1:
@@ -20,10 +23,14 @@ class Character:
         if damage < 0:
             damage = 0
         print(f"{self.name} 攻击了 {target.name}，造成 {damage} 点伤害！")
-        target.take_damage(damage)
+        self.deal_damage(target, damage)
 
     def is_alive(self):
         return self.health > 0
+
+    def on_turn_start(self):
+        """每当该角色行动回合开始时触发。子类可重写以处理回合型效果。"""
+        return
     
     def level_up(self, announce=True):
         self.level += 1
@@ -37,13 +44,33 @@ class Character:
         for _ in range(levels):
             self.level_up(announce=announce)
 
-    def take_damage(self, value,attacker,attack_type = "normal"):
-        self.health -= value
-        print(f"{self.name} 受到了 {value} 点伤害！当前生命值：{self.health}")
+    def deal_damage(self, target, value, attack_type="physical"):
+        return target.take_damage(value, attacker=self, attack_type=attack_type)
 
+    def take_damage(self, value,attacker = None,attack_type = "physical"):
+        value = int(max(0, self.before_take_damage(value, attacker, attack_type)))
+        if value == 0:
+            return 0
+        self.health -= value
+        if self.health < 0:
+            self.health = 0
+        print(f"{self.name} 受到了 {value} 点伤害！当前生命值：{self.health}")
+        self.after_take_damage(value, attacker, attack_type)
+        return value
+
+    def before_take_damage(self, value, attacker, attack_type):
+        """在受到伤害前的处理，返回可能修改后的伤害值。子类可重写此方法实现特殊效果。"""
+        return value
+    
+    def after_take_damage(self, value, attacker, attack_type):
+        """在受到伤害后的处理，子类可重写此方法实现特殊效果。"""
+        pass
+        
     def health_regeneration(self,value):
-        self.health += value
-        print(f"{self.name} 恢复了 {value} 点生命值！当前生命值：{self.health}")
+        #实际生命值不超过最大生命值
+        actual_value = min(value, self.maxHP - self.health)
+        self.health += actual_value
+        print(f"{self.name} 恢复了 {actual_value} 点生命值！当前生命值：{self.health}")
 
     def settlement(self):
         self.health = self.maxHP
@@ -69,18 +96,24 @@ class Character:
             raise ValueError(f"技能 '{skill_name}' 当前不可用")
         return skill(*args, **kwargs)
 
-    def learn_skill(self, skill_name, func):
+    def learn_skill(self, skill_name, func, description=None):
         self.skills[skill_name] = func
+        if description:
+            self.skill_descriptions[skill_name] = description
+
+    def get_skill_descriptions(self):
+        return dict(self.skill_descriptions)
 
 class Berserker(Character):
     def __init__(self, name, level = 1, maxHP = 200, attack = 100, defense = 20):
         super().__init__(name, level, maxHP, attack, defense)
         self.rage = 0
         self.rage_flag = False
+        self.rage_buff_turns = 0
         self.unleash_rage_threshold = 20
         # 狂战士专属技能
-        self.learn_skill("get_into_anger", self.get_into_anger)
-        self.learn_skill("unleash_rage", self.unleash_rage)
+        self.learn_skill("get_into_anger", self.get_into_anger, "消耗怒气进入狂怒，提升攻击并降低防御，持续3次自身行动回合。")
+        self.learn_skill("unleash_rage", self.unleash_rage, "狂怒状态下消耗怒气释放怒焰，造成高额伤害。")
         if level > 1:
             self.gain_levels(level - 1, announce=False)
             self.health = self.maxHP
@@ -93,14 +126,24 @@ class Berserker(Character):
         if skill_name == "unleash_rage":
             return self.rage_flag and self.rage >= self.unleash_rage_threshold
         return super().is_skill_available(skill_name)
+    
+    def on_turn_start(self):
+        if self.rage_flag:
+            self.rage_buff_turns -= 1
+            if self.rage_buff_turns <= 0:
+                self.attack = int(self.attack / 1.3)
+                self.defense = int(self.defense / 0.7)
+                self.rage_flag = False
+                print(f"{self.name} 的狂怒效果结束，攻击和防御恢复正常！")
 
     def attack_target(self, target):
         super().attack_target(target)
         self.rage += 10
 
-    def take_damage(self, value):
-        super().take_damage(value)
+    def after_take_damage(self, value, attacker, attack_type):
         self.rage += 5
+        if self.rage > 100:
+            self.rage = 100
 
     def get_into_anger(self):
         if self.rage >= 50:
@@ -109,6 +152,7 @@ class Berserker(Character):
             print(f"{self.name} 进入狂怒！攻击提高，但防御下降！")
             self.rage = 0
             self.rage_flag = True
+            self.rage_buff_turns = 3    
         else:
             print(f"{self.name} 怒气不足，无法进入狂怒状态！")
 
@@ -120,7 +164,7 @@ class Berserker(Character):
             if damage < 0:
                 damage = 0
             print(f"{self.name} 对 {target.name} 释放怒焰，造成 {damage} 点伤害！")
-            target.take_damage(damage)
+            self.deal_damage(target, damage)
         else:
             print(f"{self.name} 怒气不足或未进入狂怒状态，无法释放怒焰！")
 
@@ -144,8 +188,8 @@ class Vampire(Character):
         self.blood_sucking_level = 1 + (level - 1) // 5
         self.bat_count = 0
         # 吸血鬼专属技能
-        self.learn_skill("bat_summon", self.bat_summon)
-        self.learn_skill("bat_bomb", self.bat_bomb)
+        self.learn_skill("bat_summon", self.bat_summon, "召唤蝙蝠（上限3只），为普攻提供额外伤害。")
+        self.learn_skill("bat_bomb", self.bat_bomb, "引爆全部蝙蝠造成爆发伤害。")
         if level > 1:
             self.gain_levels(level - 1, announce=False)
             self.health = self.maxHP
@@ -166,10 +210,11 @@ class Vampire(Character):
         damage += int(bat_damage)
         if damage < 0:
             damage = 0
-        target.take_damage(damage)
-        blood_sucked = int(damage * 0.2) + 5 + self.blood_sucking_level * 2
-        print(f"{self.name} 吸血恢复了 {blood_sucked} 点生命值!") 
-        self.health_regeneration(blood_sucked)
+        actual_damage = self.deal_damage(target, damage)
+        if actual_damage > 0:
+            blood_sucked = int(actual_damage * 0.2) + 5 + self.blood_sucking_level * 2
+            print(f"{self.name} 吸血恢复了 {blood_sucked} 点生命值!")
+            self.health_regeneration(blood_sucked)
 
 
     def bat_summon(self):
@@ -183,7 +228,7 @@ class Vampire(Character):
         if self.bat_count > 0:
             damage = int((self.bat_count * self.attack * 0.3 * 0.4) // (1 + target.defense*0.8/100))  # 每只蝙蝠增加30%攻击力的伤害
             print(f"{self.name} 引爆了 {self.bat_count} 只蝙蝠，对 {target.name} 造成 {damage} 点伤害！")
-            target.take_damage(damage)
+            self.deal_damage(target, damage)
             self.bat_count = 0
         else:
             print(f"{self.name} 没有蝙蝠可用来引爆！")
@@ -204,8 +249,8 @@ class Knight(Character):
         self.counterattack_chance = min(0.1 + (level - 1) // 5 * 0.04,0.4)
         self.sacred_crash_flag = False
         # 骑士专属技能
-        self.learn_skill("counterattack", self.counterattack)
-        self.learn_skill("sacred_crash", self.sacred_crash)
+        self.learn_skill("counterattack", self.counterattack, "被动反击判定：受到物理伤害时有概率进行反击。")
+        self.learn_skill("sacred_crash", self.sacred_crash, "神圣冲击：根据已损生命值提高伤害。")
         if level > 1:
             self.gain_levels(level - 1, announce=False)
             self.health = self.maxHP
@@ -220,15 +265,12 @@ class Knight(Character):
     def attack_target(self, target):
         super().attack_target(target)
 
-    def take_damage(self, value):
-        if self.counterattack():
-            print(f"{self.name} 成功格挡了攻击，未受到伤害！")
-            self.counterattack_active = False
-            return
-        else:
-            print(f"{self.name} 格挡失败，受到全额伤害！")
-            self.counterattack_active = False
-            super().take_damage(value)
+    def before_take_damage(self, value, attacker, attack_type):
+        if attack_type == "physical" and attacker is not None and self.counterattack():
+            counter_damage = int(value * 0.3)   # 格挡成功后反击伤害为原伤害的30%，可以部分穿透攻击者防御
+            print(f"{self.name} 成功格挡了攻击，并反击了 {attacker.name}，造成 {counter_damage} 点伤害！")
+            self.deal_damage(attacker, counter_damage, attack_type="counterattack")
+        return value
 
     def sacred_crash(self, target):
         if self.sacred_crash_flag:
@@ -238,7 +280,7 @@ class Knight(Character):
         if damage < 0:
             damage = 0
         print(f"{self.name} 施放神圣冲击，对 {target.name} 造成 {damage} 点伤害！")
-        target.take_damage(damage)
+        self.deal_damage(target, damage)
         self.sacred_crash_flag = True
 
     def counterattack(self):
@@ -265,9 +307,11 @@ class DragonHuman(Character):
         super().__init__(name, level, maxHP, attack, defense)
         self.dragon_breath = 0
         self.max_dragon_breath = 50
+        self.attack_buff_flag = False
+        self.attack_buff_turns = 0
         # 龙裔专属技能
-        self.learn_skill("dragon_breath_attack", self.dragon_breath_attack)
-        self.learn_skill("dragon_flame", self.dragon_flame)
+        self.learn_skill("dragon_breath_attack", self.dragon_breath_attack, "消耗龙息释放强化攻击，并获得2回合攻击提升。")
+        self.learn_skill("dragon_flame", self.dragon_flame, "消耗满龙息释放龙焰，对目标造成最大生命值百分比伤害。")
         if level > 1:
             self.gain_levels(level - 1, announce=False)
             self.health = self.maxHP
@@ -280,6 +324,14 @@ class DragonHuman(Character):
             return self.dragon_breath >= 50
         return super().is_skill_available(skill_name)
     
+    def on_turn_start(self):
+        if self.attack_buff_flag:
+            self.attack_buff_turns -= 1
+            if self.attack_buff_turns <= 0:
+                self.attack = int(self.attack / 1.2)  # 恢复原始攻击力
+                self.attack_buff_flag = False
+                print(f"{self.name} 的龙息攻击效果结束，攻击力恢复正常！")
+
     def attack_target(self, target):
         super().attack_target(target)
         self.dragon_breath += 10
@@ -292,15 +344,20 @@ class DragonHuman(Character):
             damage = int(damage)
             self.dragon_breath = 0
             print(f"{self.name} 释放龙焰，对 {target.name} 造成 {damage} 点伤害！")
-            target.take_damage(damage)
+            self.deal_damage(target, damage, attack_type="magical")
 
+    #龙息攻击，伤害根据龙息值和等级提升，可以部分穿透目标防御，且短暂提高自身的攻击力,持续2回合
     def dragon_breath_attack(self,target):
         if self.dragon_breath >= 30:
             damage = self.dragon_breath * (self.level * 0.15 + 1) // (1 + target.defense*0.3/100)  # 龙息攻击伤害根据龙息值和等级提升，可以部分穿透目标防御
             self.dragon_breath = 0
             damage = int(damage)
             print(f"{self.name} 释放龙息，对 {target.name} 造成 {damage} 点伤害！")
-            target.take_damage(damage)
+            if not self.attack_buff_flag:
+                self.attack = int(self.attack * 1.2)  # 暂时提高攻击力
+                self.attack_buff_flag = True
+            self.attack_buff_turns = 2
+            self.deal_damage(target, damage, attack_type="magical")
         else:
             print("龙息值不足，无法释放龙息攻击！")
 
@@ -322,8 +379,8 @@ class FlameWitch(Character):
         self.MP = self.maxMP
         self.shield = 0
         # 炎术女巫专属技能
-        self.learn_skill("flame_crash", self.flame_crash)
-        self.learn_skill("flame_shield", self.flame_shield)
+        self.learn_skill("flame_crash", self.flame_crash, "消耗法力施放爆炎冲击，造成魔法伤害。")
+        self.learn_skill("flame_shield", self.flame_shield, "消耗法力生成烈焰护盾，护盾破裂时反弹部分伤害。")
         if level > 1:
             self.gain_levels(level - 1, announce=False)
             self.health = self.maxHP
@@ -337,12 +394,12 @@ class FlameWitch(Character):
 
     def flame_crash(self,target):
         if self.MP < 20:
-            print(f"{self.name} 法力不足，无法施放烈焰冲击！")
+            print(f"{self.name} 法力不足，无法施放爆炎冲击！")
             return
         self.MP -= 20
         
-        print(f"{self.name} 施放烈焰冲击，对 {target.name} 造成 {self.attack*0.3+20} 点伤害！")
-        target.take_damage(self.attack*0.3+20)
+        print(f"{self.name} 施放爆炎冲击，对 {target.name} 造成 {self.attack*0.3+20} 点伤害！")
+        self.deal_damage(target, self.attack*0.3+20, attack_type="magical")
     
     def flame_shield(self):
         if self.MP < 20:
@@ -352,20 +409,23 @@ class FlameWitch(Character):
         self.shield = int(self.maxHP * 0.10 + 30)
         print(f"{self.name} 施放烈焰护盾，获得 {self.shield} 点护盾值！")
     
-    def take_damage(self, value):
+    def before_take_damage(self, value, attacker, attack_type):
         if self.shield > 0:
-            blocked = min(self.shield, value)
-            self.shield -= blocked
-            remain = value - blocked
-            if remain > 0:
-                super().take_damage(remain)
-            print(f"{self.name} 的护盾吸收了 {blocked} 点伤害，剩余护盾：{self.shield}")
-            return
-        super().take_damage(value)
-    
+            if attack_type != "counterattack": 
+                blocked = min(self.shield, value)
+                self.shield -= blocked
+                remain = value - blocked
+                print(f"{self.name} 的烈焰护盾吸收了 {blocked} 点伤害，剩余护盾：{self.shield}")
+                    
+                if self.shield == 0 and attacker is not None:
+                    self.deal_damage(attacker, int(blocked * 0.3), attack_type="counterattack")  # 护盾被打破时反弹伤害
+                    print(f"{self.name} 的烈焰护盾被打破了，反弹了 {int(blocked * 0.3)} 点伤害给 {attacker.name}！")
+                return remain
+        return value
+
     def level_up(self, announce=True):
         super().level_up(announce=announce)
-        self.maxMP += 4
+        self.maxMP += 2
         self.attack += 10
         self.defense += 3
         self.maxHP += 12
@@ -381,8 +441,8 @@ class Mermaid(Character):
         self.water_control_level = 1 + (level - 1) // 5
         self.shield = 0
         self.remaining_songs = 2
-        self.learn_skill("water_shield", self.water_shield)
-        self.learn_skill("cure_song", self.cure_song)
+        self.learn_skill("water_shield", self.water_shield, "生成水盾优先吸收伤害。")
+        self.learn_skill("cure_song", self.cure_song, "回复已损生命值的60%，最多300，战斗内次数有限。")
         if level > 1:
             self.gain_levels(level - 1, announce=False)
             self.health = self.maxHP
@@ -393,17 +453,14 @@ class Mermaid(Character):
         self.shield = int(self.water_control_level * 20 + self.defense * 0.1)
         print(f"{self.name} 形成了水盾，获得 {self.shield} 点护盾值！")
     
-    def take_damage(self, value):
+    def before_take_damage(self, value, attacker, attack_type):
         if self.shield > 0:
             blocked = min(self.shield, value)
             self.shield -= blocked
             remain = value - blocked
-            if remain > 0:
-                super().take_damage(remain)
-            print(f"{self.name} 的水盾吸收了 {blocked} 点伤害，剩余水盾：{self.shield}")
-            return
-        else:
-            super().take_damage(value)
+            print(f"{self.name} 的水盾吸收了 {blocked} 点伤害，剩余护盾：{self.shield}")
+            return remain
+        return value
 
     def cure_song(self):
         if self.remaining_songs > 0:
@@ -435,13 +492,19 @@ class WolfMan(Character):
     def __init__(self, name, level = 1, maxHP = 220, attack = 85, defense = 25):
         super().__init__(name, level, maxHP, attack, defense)
         self.wolf_evolution_flag = False
-        self.learn_skill("wolf_evolution", self.wolf_evolution)
-        self.learn_skill("bloody_bite", self.bloody_bite)
+        self.learn_skill("wolf_evolution", self.wolf_evolution, "生命值较低时可进入狼化形态，普攻更易穿透防御。")
+        self.learn_skill("bloody_bite", self.bloody_bite, "造成伤害并在目标血量较高时吸血。")
         if level > 1:
             self.gain_levels(level - 1, announce=False)
             self.health = self.maxHP
             self.wolf_evolution_flag = False
 
+    def is_skill_available(self, skill_name):
+        if skill_name == "wolf_evolution":
+            return self.health < self.maxHP * 0.4 and not self.wolf_evolution_flag
+        if skill_name == "bloody_bite":
+            return True  # 血腥之咬始终可用，但效果根据目标当前生命值变化
+        return super().is_skill_available(skill_name)
     
     def wolf_evolution(self):
         if self.health < self.maxHP * 0.4 and self.wolf_evolution_flag == False:
@@ -454,19 +517,22 @@ class WolfMan(Character):
         if self.wolf_evolution_flag == True:
             damage = self.attack * 40 // (100 + target.defense*0.4)  # 狼人形态部分无视防御
             print(f"{self.name} 狼化攻击了 {target.name}，造成 {int(damage)} 点伤害！")
-            target.take_damage(damage)
+            self.deal_damage(target, damage)
         else:
             super().attack_target(target)
     
     def bloody_bite(self,target):
         damage = int(self.attack * 0.5 // (1 + target.defense*0.8/100))
-        if target.health > target.maxHP * 0.5:
-            bite_heal = int(damage * 0.3)
-            print(f"{self.name} 使用血腥之咬，对 {target.name}造成了{damage} 点伤害，并吸取了 {bite_heal} 点生命值！")
-            self.health_regeneration(bite_heal)
+        target_hp_ratio_before = target.health / target.maxHP if target.maxHP > 0 else 0
+        actual_damage = self.deal_damage(target, damage)
+        if target_hp_ratio_before > 0.5:
+            if actual_damage > 0:
+                bite_heal = int(actual_damage * 0.5)  # 吸取实际造成伤害的50%作为生命回复
+                if bite_heal > 0:
+                    print(f"{self.name} 使用血腥之咬，对 {target.name} 造成了 {actual_damage} 点伤害，并吸取了 {bite_heal} 点生命值！")
+                    self.health_regeneration(bite_heal)
         else:
             print(f"{target.name}的生命值过低，无法吸取生命值！")
-        target.take_damage(damage)
 
 
     def level_up(self, announce=True):
@@ -478,3 +544,119 @@ class WolfMan(Character):
     def settlement(self):
         super().settlement()
         self.wolf_evolution_flag = False
+
+"""
+### 8.德鲁伊Druid
+*与自然融为一体的守护者，能召唤自然力量进行战斗*
+**技能**：
+- 1. 自然召唤：随机召唤一个自然生物来协助战斗，每个生物有不同的能力，上限2个
+    - 熊：高额攻击力
+    - 鹰：高额暴击率
+    - 树人：代替德鲁伊承受伤害
+    - 兔子：使得德鲁伊概率闪避攻击
+    - 鹿：德鲁伊发动攻击时有概率回复生命值
+- 2.树灵佑护：暂时提高自身的防御力，持续几回合
+"""
+class Druid(Character):
+    def __init__(self, name, level = 1, maxHP = 200, attack = 80, defense = 15):
+        super().__init__(name, level, maxHP, attack, defense)
+        self.nature_summon_count = 0
+        self.nature_summon_limit = 2
+        self.summons = {'bear': False, 'eagle': False, 'treant': False, 'rabbit': False, 'deer': False}
+        self.summons_on_field = []
+        self.tree_spirit_blessing_turns = 0
+        self.treant_max_hp = int(self.maxHP * 0.2)
+        self.tree_spirit_blessing_active = False
+        self.learn_skill("nature_summon", self.nature_summon, "随机召唤自然生物协助战斗，最多2个。")
+        self.learn_skill("tree_spirit_blessing", self.tree_spirit_blessing, "提升防御3次自身行动回合。")
+
+    def is_skill_available(self, skill_name):
+        if skill_name == "nature_summon":
+            return self.nature_summon_count < self.nature_summon_limit
+        if skill_name == "tree_spirit_blessing":
+            return not self.tree_spirit_blessing_active
+        return super().is_skill_available(skill_name)
+    
+    def nature_summon(self):
+        if self.nature_summon_count >= self.nature_summon_limit:
+            print(f"{self.name} 已经召唤了 {self.nature_summon_limit} 个自然生物，无法再召唤了！")
+            return
+        summon = random.choice(list(self.summons.keys()))
+        while self.summons[summon]:  # 如果随机到的生物已经在场上了，就重新随机
+            summon = random.choice(list(self.summons.keys()))
+        self.summons[summon] = True
+        self.nature_summon_count += 1
+        self.summons_on_field.append(summon)
+        print(f"{self.name} 召唤了一个 {summon} 来协助战斗！当前召唤数量：{self.nature_summon_count}")
+
+    def tree_spirit_blessing(self):
+        if self.tree_spirit_blessing_active:
+            print(f"{self.name} 已经受到了树灵的佑护，无法再次使用了！")
+            return
+        self.defense = int(self.defense * 1.25)
+        self.tree_spirit_blessing_active = True
+        self.tree_spirit_blessing_turns = 3  # 树灵佑护持续3回合
+        print(f"{self.name} 受到了树灵的佑护，防御力暂时提高了！")
+
+    def on_turn_start(self):
+        if self.tree_spirit_blessing_active:
+            self.tree_spirit_blessing_turns -= 1
+            if self.tree_spirit_blessing_turns <= 0:
+                self.defense = int(self.defense / 1.25)  # 恢复原始防御力
+                self.tree_spirit_blessing_active = False
+                print(f"{self.name} 的树灵佑护效果结束，防御力恢复正常！")
+    
+    def attack_target(self, target):
+        damage = self.attack * 40 // (100 + target.defense*0.8)
+        print(f"{self.name} 攻击了 {target.name}，造成 {damage} 点伤害！")
+        if 'deer' in self.summons_on_field:
+           if random.random() < 0.4:  # 40%概率回复生命值
+                heal_value = int(self.health * 0.3)  # 回复30%当前生命值
+                self.health_regeneration(heal_value)
+                print(f"{self.name} 的鹿帮助他回复了 {heal_value} 点生命值！")
+        if 'bear' in self.summons_on_field:
+            bear_damage = int((self.attack * 10) // (100 + target.defense*0.8)) 
+            damage += bear_damage
+            print(f"{self.name} 的熊造成了额外 {bear_damage} 点伤害！")
+        if 'eagle' in self.summons_on_field:
+            eagle_damage = int((self.attack * 5) // (100 + target.defense*0.8))
+            if random.random() < 0.3:  # 30%概率暴击
+                eagle_damage = 2 * eagle_damage
+                print(f"{self.name} 的鹰触发了暴击！")
+            damage += eagle_damage
+            print(f"{self.name} 的鹰造成了额外 {eagle_damage} 点伤害！")
+        
+        self.deal_damage(target, damage)
+
+    def before_take_damage(self, value, attacker, attack_type):
+        if 'treant' in self.summons_on_field:
+            treant_block = min(self.treant_max_hp, value)
+            self.treant_max_hp -= treant_block
+            remain = value - treant_block
+            print(f"{self.name} 的树人代替他承受了 {treant_block} 点伤害，树人剩余生命值：{self.treant_max_hp}")
+            if self.treant_max_hp <= 0:
+                print(f"{self.name} 的树人被击败了！")
+                self.summons['treant'] = False
+                self.summons_on_field.remove('treant')
+                self.nature_summon_count -= 1
+            return remain
+        if 'rabbit' in self.summons_on_field:
+            if random.random() < 0.3:  # 30%概率闪避攻击
+                print(f"{self.name} 的兔子帮助他闪避了攻击！")
+                return 0  # 闪避成功，德鲁伊不受伤害
+        return value
+    
+    def level_up(self, announce=True):
+        super().level_up(announce=announce)
+        self.maxHP += 12
+        self.attack += 9
+        self.defense += 4
+
+    def settlement(self):
+        super().settlement()
+        self.nature_summon_count = 0
+        self.summons = {key: False for key in self.summons}
+        self.summons_on_field = []
+        self.tree_spirit_blessing_active = False
+        self.tree_spirit_blessing_turns = 0
+        self.treant_max_hp = int(self.maxHP * 0.2)
