@@ -124,7 +124,7 @@ class BattleSystem:
 def demo():
 	
 	print("正在创建两个测试角色...")
-	bers = battle_character.WolfMan("Heracles", level=31)
+	bers = battle_character.Berserker("Heracles", level=31)
 	witch = battle_character.Mermaid("Circe", level=31)
 	bs = BattleSystem(bers, witch)
 	
