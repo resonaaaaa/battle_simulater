@@ -13,6 +13,26 @@ class Character:
         self.skills = {"attack": self.attack_target}
         self.skill_descriptions = {"attack": "普通攻击，造成基于攻击与目标防御计算的物理伤害。"}
 
+        # 通用控制/减益状态
+        """冻结"""
+        self.skip_turn = False 
+        self.frozen_turns = 0
+        """攻击力下降"""
+        self.attack_down_turns = 0
+        self.attack_down_value = 0
+        self.attack_down_source = ""
+        """防御力下降"""
+        self.defense_down_turns = 0
+        self.defense_down_value = 0
+        self.defense_down_source = ""
+        """持续伤害"""
+        self.continuous_damage_turns = 0
+        self.continuous_damage_value = 0
+        self.continuous_damage_source = ""
+        """无法回复"""
+        self.reheal_limit = False
+        self.reheal_limit_turns = 0
+
         # 仅基础 Character 在这里直接补齐等级；子类会在各自 __init__ 末尾处理
         if self.__class__ is Character and level > 1:
             self.gain_levels(level - 1, announce=False)
@@ -30,7 +50,52 @@ class Character:
 
     def on_turn_start(self):
         """每当该角色行动回合开始时触发。子类可重写以处理回合型效果。"""
-        return
+        self.skip_turn = False
+
+        #通用持续伤害结算
+        if self.continuous_damage_turns > 0 and self.continuous_damage_value > 0:
+            source_name = self.continuous_damage_source.name if self.continuous_damage_source is not None else "持续伤害"
+            print(f"{self.name} 受到了 {source_name} 的持续伤害！")
+            self.take_damage(self.continuous_damage_value, attacker=self.continuous_damage_source, attack_type="continuous")
+            self.continuous_damage_turns -= 1
+            if self.continuous_damage_turns <= 0:
+                self.continuous_damage_value = 0
+                self.continuous_damage_source = ""
+            
+
+        #攻击力下降
+        if self.attack_down_turns > 0:
+            self.attack_down_turns -= 1
+            if self.attack_down_turns <= 0 and self.attack_down_value > 0:
+                self.attack += self.attack_down_value
+                print(f"{self.name} 的攻击抑制效果结束，攻击力恢复了 {self.attack_down_value} 点！")
+                self.attack_down_value = 0
+                self.attack_down_source = ""
+
+        #防御力下降
+        if self.defense_down_turns > 0:
+            self.defense_down_turns -= 1
+            if self.defense_down_turns <= 0 and self.defense_down_value > 0:
+                self.defense += self.defense_down_value
+                print(f"{self.name} 的防御抑制效果结束，防御力恢复了 {self.defense_down_value} 点！")
+                self.defense_down_value = 0
+                self.defense_down_source = ""
+
+        #无法回复
+        if self.reheal_limit_turns > 0:
+            self.reheal_limit_turns -= 1
+            if self.reheal_limit_turns <= 0:
+                self.reheal_limit = False
+                print(f"{self.name} 的无法回复效果结束，可以恢复生命值了！")
+
+        # 冻结：冻结期间无法行动
+        if self.frozen_turns > 0:
+            print(f"{self.name} 被冻结，无法行动！")
+            self.frozen_turns -= 1
+            self.skip_turn = True
+
+    def can_act(self):
+        return not self.skip_turn
     
     def level_up(self, announce=True):
         self.level += 1
@@ -67,13 +132,94 @@ class Character:
         pass
         
     def health_regeneration(self,value):
-        #实际生命值不超过最大生命值
+        if self.reheal_limit:
+            print(f"{self.name} 目前无法回复生命值！")
+            return
         actual_value = min(value, self.maxHP - self.health)
         self.health += actual_value
         print(f"{self.name} 恢复了 {actual_value} 点生命值！当前生命值：{self.health}")
 
     def settlement(self):
         self.health = self.maxHP
+        self.clear_debuffs(silent=True)
+        self.skip_turn = False
+
+    def clear_debuffs(self, silent=False):
+        """清除通用debuff，并回滚由debuff带来的属性变化。"""
+        self.frozen_turns = 0
+        if self.attack_down_value > 0:
+            self.attack += self.attack_down_value
+        if self.defense_down_value > 0:
+            self.defense += self.defense_down_value
+
+        self.attack_down_turns = 0
+        self.attack_down_value = 0
+        self.attack_down_source = ""
+        self.defense_down_turns = 0
+        self.defense_down_value = 0
+        self.defense_down_source = ""
+        self.continuous_damage_turns = 0
+        self.continuous_damage_value = 0
+        self.continuous_damage_source = ""
+        self.reheal_limit = False
+        self.reheal_limit_turns = 0
+        if not silent:
+            print(f"{self.name} 身上的负面状态已被清除。")
+
+    def apply_freeze(self, turns=1, source_name=""):
+        turns = int(max(0, turns))
+        if turns <= 0:
+            return
+        self.frozen_turns = max(self.frozen_turns, turns)
+        if source_name:
+            print(f"{self.name} 被 {source_name} 冻结了 {turns} 回合！")
+        else:
+            print(f"{self.name} 被冻结了 {turns} 回合！")
+
+    def apply_attack_down(self, ratio, turns, source_name=""):
+        turns = int(max(0, turns))
+        ratio = max(0.0, float(ratio))
+        if turns <= 0 or ratio <= 0:
+            return
+        # 先撤销旧攻击降低，再按当前攻击重新计算，避免叠减失真
+        if self.attack_down_value > 0:
+            self.attack += self.attack_down_value
+
+        down_value = int(max(1, self.attack * ratio))
+        down_value = min(down_value, max(0, self.attack - 1))
+        self.attack -= down_value
+        self.attack_down_value = down_value
+        self.attack_down_turns = turns
+        self.attack_down_source = source_name
+        print(f"{self.name} 的攻击被压制，降低了 {down_value} 点，持续 {turns} 回合！")
+
+    def apply_defense_down(self, ratio, turns, source_name=""):
+        turns = int(max(0, turns))
+        ratio = max(0.0, float(ratio))
+        if turns <= 0 or ratio <= 0:
+            return
+        # 先撤销旧防御降低，再按当前防御重新计算，避免叠减失真
+        if self.defense_down_value > 0:
+            self.defense += self.defense_down_value
+
+        down_value = int(max(1, self.defense * ratio))
+        down_value = min(down_value, max(0, self.defense - 1))
+        self.defense -= down_value
+        self.defense_down_value = down_value
+        self.defense_down_turns = turns
+        self.defense_down_source = source_name
+        print(f"{self.name} 的防御被压制，降低了 {down_value} 点，持续 {turns} 回合！")
+
+    def apply_continuous_damage(self, value, turns, source=None):
+        value = int(max(0, value))
+        turns = int(max(0, turns))
+        if value <= 0 or turns <= 0:
+            return
+        self.continuous_damage_value = value
+        self.continuous_damage_turns = turns
+        self.continuous_damage_source = source
+        source_name = source.name if source is not None else "未知来源"
+        print(f"{self.name} 受到了 {source_name} 的持续伤害效果，每回合 {value} 点，持续 {turns} 回合！")
 
     # 通用技能接口 ------------------------------------------------
     def is_skill_available(self, skill_name):
@@ -104,6 +250,30 @@ class Character:
     def get_skill_descriptions(self):
         return dict(self.skill_descriptions)
 
+    def get_runtime_status(self):
+        """统一状态接口：返回当前 buff/debuff 与技能可用性信息。"""
+        buffs = []
+        debuffs = []
+        if self.frozen_turns > 0:
+            debuffs.append(f"frozen({self.frozen_turns})")
+        if self.attack_down_turns > 0 and self.attack_down_value > 0:
+            debuffs.append(f"atk_down(-{self.attack_down_value}, {self.attack_down_turns})")
+        if self.defense_down_turns > 0 and self.defense_down_value > 0:
+            debuffs.append(f"def_down(-{self.defense_down_value}, {self.defense_down_turns})")
+        if self.continuous_damage_turns > 0 and self.continuous_damage_value > 0:
+            debuffs.append(f"cont_dmg({self.continuous_damage_value}, {self.continuous_damage_turns})")
+        if self.reheal_limit and self.reheal_limit_turns > 0:
+            debuffs.append(f"no_heal({self.reheal_limit_turns})")
+        return {
+            "buffs": buffs,
+            "debuffs": debuffs,
+            "skill_runtime": self.get_skill_runtime_info(),
+        }
+
+    def get_skill_runtime_info(self):
+        """统一技能运行时信息接口，子类可覆盖返回冷却/次数等。"""
+        return {}
+
 class Berserker(Character):
     def __init__(self, name, level = 1, maxHP = 220, attack = 100, defense = 20):
         super().__init__(name, level, maxHP, attack, defense)
@@ -111,8 +281,10 @@ class Berserker(Character):
         self.rage_flag = False
         self.rage_buff_turns = 0
         self.unleash_rage_threshold = 20
-        self.learn_skill("get_into_anger", self.get_into_anger, "消耗怒气进入狂怒，提升攻击并降低防御，持续3次自身行动回合。")
-        self.learn_skill("unleash_rage", self.unleash_rage, "狂怒状态下消耗怒气释放怒焰，造成高额伤害。")
+        self.crazy_strike_cooldown = 0
+        self.learn_skill("get_into_anger", self.get_into_anger, "消耗50点怒气进入狂怒，提升攻击并降低防御，持续3次自身行动回合。")
+        self.learn_skill("unleash_rage", self.unleash_rage, "狂怒状态下消耗至少20点怒气释放怒焰，造成高额伤害。")
+        self.learn_skill("crazy_strike", self.crazy_strike, "消耗20点怒气，对敌人造成部分穿透防御的伤害，并有概率使敌人防御力下降2回合，冷却4回合。有20%概率造成暴击。")
         if level > 1:
             self.gain_levels(level - 1, announce=False)
             self.health = self.maxHP
@@ -124,9 +296,12 @@ class Berserker(Character):
             return (not self.rage_flag) and self.rage >= 50
         if skill_name == "unleash_rage":
             return self.rage_flag and self.rage >= self.unleash_rage_threshold
+        if skill_name == "crazy_strike":
+            return self.crazy_strike_cooldown <= 0 and self.rage >= 20
         return super().is_skill_available(skill_name)
     
     def on_turn_start(self):
+        super().on_turn_start()
         if self.rage_flag:
             self.rage_buff_turns -= 1
             if self.rage_buff_turns <= 0:
@@ -134,6 +309,9 @@ class Berserker(Character):
                 self.defense = int(self.defense / 0.7)
                 self.rage_flag = False
                 print(f"{self.name} 的狂怒效果结束，攻击和防御恢复正常！")
+        if self.crazy_strike_cooldown > 0:
+            self.crazy_strike_cooldown -= 1
+
 
     def attack_target(self, target):
         super().attack_target(target)
@@ -155,6 +333,24 @@ class Berserker(Character):
         else:
             print(f"{self.name} 怒气不足，无法进入狂怒状态！")
 
+    def crazy_strike(self, target):
+        if self.rage < 20:
+            print(f"{self.name} 怒气不足，无法使用狂暴重击！")
+            return
+        damage = int(self.attack * 0.45) // (1 + target.defense*0.6/100)
+        if damage < 0:
+            damage = 0
+        if random.random() < 0.2:
+            damage = int(damage * 1.5)
+            print(f"{self.name} 的狂暴重击触发了暴击！伤害大幅提升！")
+        print(f"{self.name} 使用了狂暴重击，对 {target.name} 造成 {damage} 点伤害！")
+        self.deal_damage(target, damage)
+        self.rage -= 20
+        # 50%概率使敌人防御力下降，持续2回合
+        if random.random() < 0.5:
+            target.apply_defense_down(ratio=0.20, turns=2, source_name="狂暴重击")
+        self.crazy_strike_cooldown = 4
+
     def unleash_rage(self, target):
         if self.rage_flag and self.rage >= self.unleash_rage_threshold:
             damage = int(self.attack * 0.5 + 2 * self.rage) // (1 + target.defense*0.8/100)  # 狂怒释放伤害根据当前攻击力和怒气值计算
@@ -171,7 +367,7 @@ class Berserker(Character):
         super().level_up(announce=announce)
         self.maxHP += 16
         self.attack += 11
-        self.defense += 3
+        self.defense += 4
     
     def settlement(self):
         if self.rage_flag:
@@ -181,13 +377,24 @@ class Berserker(Character):
         self.rage = 0
         self.rage_flag = False
 
+    def get_runtime_status(self):
+        data = super().get_runtime_status()
+        if self.rage_flag:
+            data["buffs"].append(f"rage({self.rage_buff_turns})")
+        return data
+
+    def get_skill_runtime_info(self):
+        return {
+            "crazy_strike": f"cd={self.crazy_strike_cooldown}",
+        }
+
 class Vampire(Character):
     def __init__(self, name, level = 1, maxHP = 210, attack = 90, defense = 15):
         super().__init__(name, level, maxHP, attack, defense)
         self.blood_sucking_level = 1 + (level - 1) // 5
         self.bat_count = 0
-        self.learn_skill("bat_summon", self.bat_summon, "召唤蝙蝠（上限3只），为普攻提供额外伤害。")
-        self.learn_skill("bat_bomb", self.bat_bomb, "引爆全部蝙蝠造成高爆发伤害。")
+        self.learn_skill("bat_summon", self.bat_summon, "召唤蝙蝠（上限3只），为普攻提供额外伤害，蝙蝠的攻击部分穿透防御。")
+        self.learn_skill("bat_bomb", self.bat_bomb, "引爆全部蝙蝠造成高爆发伤害，蝙蝠越多，伤害越高。")
         if level > 1:
             self.gain_levels(level - 1, announce=False)
             self.health = self.maxHP
@@ -249,7 +456,7 @@ class Knight(Character):
         self.counterattack_active_turns = 0
         self.counterattack_damage_ratio = 0.6
         self.counterattack_cooldown = 0
-        self.learn_skill("counterattack", self.counterattack, "进入反击架势：下一次受到物理伤害时完全格挡并反击。")
+        self.learn_skill("counterattack", self.counterattack, "进入反击架势：下一次受到物理伤害时完全格挡并反击60%的伤害。")
         self.learn_skill("sacred_crash", self.sacred_crash, "神圣冲击：根据已损生命值提高伤害。")
         if level > 1:
             self.gain_levels(level - 1, announce=False)
@@ -263,6 +470,7 @@ class Knight(Character):
         return super().is_skill_available(skill_name)
 
     def on_turn_start(self):
+        super().on_turn_start()
         if self.counterattack_cooldown > 0:
             self.counterattack_cooldown -= 1
         if self.counterattack_active:
@@ -319,6 +527,18 @@ class Knight(Character):
         self.counterattack_active_turns = 0
         self.counterattack_cooldown = 0
 
+    def get_runtime_status(self):
+        data = super().get_runtime_status()
+        if self.counterattack_active:
+            data["buffs"].append(f"counter_stance({self.counterattack_active_turns})")
+        return data
+
+    def get_skill_runtime_info(self):
+        return {
+            "counterattack": f"cd={self.counterattack_cooldown}",
+            "sacred_crash": f"remaining={0 if self.sacred_crash_flag else 1}",
+        }
+
 
 class DragonHuman(Character):
     def __init__(self, name, level= 1, maxHP = 240, attack = 90, defense = 25):
@@ -328,7 +548,7 @@ class DragonHuman(Character):
         self.attack_buff_flag = False
         self.attack_buff_turns = 0
         self.learn_skill("dragon_breath_attack", self.dragon_breath_attack, "消耗所有龙息释放强化攻击，并获得2回合攻击提升。")
-        self.learn_skill("dragon_flame", self.dragon_flame, "消耗所有龙息释放龙焰，对目标造成最大生命值百分比伤害。")
+        self.learn_skill("dragon_flame", self.dragon_flame, "消耗所有龙息释放龙焰，对目标造成最大生命值百分比伤害，并附加2回合的龙炎效果，造成持续伤害并无法回血。")
         if level > 1:
             self.gain_levels(level - 1, announce=False)
             self.health = self.maxHP
@@ -342,6 +562,7 @@ class DragonHuman(Character):
         return super().is_skill_available(skill_name)
     
     def on_turn_start(self):
+        super().on_turn_start()
         if self.attack_buff_flag:
             self.attack_buff_turns -= 1
             if self.attack_buff_turns <= 0:
@@ -362,6 +583,11 @@ class DragonHuman(Character):
             self.dragon_breath = 0
             print(f"{self.name} 释放龙焰，对 {target.name} 造成 {damage} 点伤害！")
             self.deal_damage(target, damage, attack_type="magical")
+            target.apply_continuous_damage(value=min(40, int(target.health * 0.10)), turns=2, source=self)  # 每回合造成敌人当前生命值10%的伤害，最多40点，并且无法回血
+            target.reheal_limit = True
+            target.reheal_limit_turns = 2
+        else:
+            print("龙息值不足，无法释放龙焰！")
 
     #龙息攻击，伤害根据龙息值和等级提升，可以部分穿透目标防御，且短暂提高自身的攻击力,持续2回合
     def dragon_breath_attack(self,target):
@@ -390,13 +616,16 @@ class DragonHuman(Character):
         super().settlement()
         self.dragon_breath = 0
 
+    def get_skill_runtime_info(self):
+        return {}
+
 class FlameWitch(Character):
     def __init__(self, name, level = 1, maxHP = 195, attack = 100, defense = 10):
         super().__init__(name, level, maxHP, attack, defense)
-        self.maxMP = 80
+        self.maxMP = 60
         self.MP = self.maxMP
         self.shield = 0
-        self.learn_skill("flame_crash", self.flame_crash, "消耗法力施放爆炎冲击，造成魔法伤害。")
+        self.learn_skill("flame_crash", self.flame_crash, "消耗法力施放爆炎冲击，造成无视防御的魔法伤害,且附带灼烧效果，3回合内造成持续伤害并降低攻击力")
         self.learn_skill("flame_shield", self.flame_shield, "消耗法力生成烈焰护盾，护盾破裂时反弹部分伤害。")
         if level > 1:
             self.gain_levels(level - 1, announce=False)
@@ -406,24 +635,30 @@ class FlameWitch(Character):
 
     def is_skill_available(self, skill_name):
         if skill_name in {"flame_crash", "flame_shield"}:
-            return self.MP >= 20
+            return self.MP >= 25
         return super().is_skill_available(skill_name)
 
     def flame_crash(self,target):
-        if self.MP < 20:
+        if self.MP < 25:
             print(f"{self.name} 法力不足，无法施放爆炎冲击！")
             return
-        self.MP -= 20
+        self.MP -= 25
         
-        print(f"{self.name} 施放爆炎冲击，对 {target.name} 造成 {self.attack*0.3+20} 点伤害！")
-        self.deal_damage(target, self.attack*0.3+20, attack_type="magical")
+        crash_damage = int(self.attack * 0.16 + 32)
+        print(f"{self.name} 施放爆炎冲击，对 {target.name} 造成 {crash_damage} 点伤害！")
+        self.deal_damage(target, crash_damage, attack_type="magical")
+        if target.continuous_damage_turns == 0:  # 如果目标没有持续伤害效果，则施加新的灼烧效果
+            target.apply_continuous_damage(value=min(24, int(target.health * 0.07)), turns=3, source=self)  # 每回合造成敌人当前生命值7%的伤害，最多24点
+            target.apply_attack_down(ratio=0.08, turns=3, source_name="灼烧")  # 降低敌人8%攻击力，持续3回合
+        else:
+            print(f"{target.name} 已经有灼烧效果了，无法再次施加灼烧效果！")
     
     def flame_shield(self):
-        if self.MP < 20:
+        if self.MP < 25:
             print(f"{self.name} 法力不足，无法施放烈焰护盾！")
             return
-        self.MP -= 20
-        self.shield = int(self.maxHP * 0.10 + 35)
+        self.MP -= 25
+        self.shield = min(int(self.maxHP * 0.06 + 28), 80)
         print(f"{self.name} 施放烈焰护盾，获得 {self.shield} 点护盾值！")
     
     def before_take_damage(self, value, attacker, attack_type):
@@ -435,10 +670,15 @@ class FlameWitch(Character):
                 print(f"{self.name} 的烈焰护盾吸收了 {blocked} 点伤害，剩余护盾：{self.shield}")
                     
                 if self.shield == 0 and attacker is not None:
-                    self.deal_damage(attacker, int(blocked * 0.5), attack_type="counterattack")  # 护盾被打破时反弹伤害
-                    print(f"{self.name} 的烈焰护盾被打破了，反弹了 {int(blocked * 0.5)} 点伤害给 {attacker.name}！")
+                    bounce = int(blocked * 0.3)
+                    if bounce > 0:
+                        print(f"{self.name} 的烈焰护盾被打破了，反弹了 {bounce} 点伤害给 {attacker.name}！")
+                        self.deal_damage(attacker, bounce, attack_type="counterattack")  # 护盾被打破时反弹伤害
                 return remain
         return value
+
+    def get_skill_runtime_info(self):
+        return {}
 
     def level_up(self, announce=True):
         super().level_up(announce=announce)
@@ -458,29 +698,45 @@ class Mermaid(Character):
         self.water_control_level = 1 + (level - 1) // 5
         self.shield = 0
         self.water_shield_cooldown = 0
-        self.remaining_songs = 2
+        self.rapid_flow_cooldown = 0
+        self.support_skill_uses = 2
         self.learn_skill("water_shield", self.water_shield, "生成水盾优先吸收伤害，冷却5回合。")
-        self.learn_skill("cure_song", self.cure_song, "回复已损生命值的60%，最多240点，战斗内最多使用2次。")
+        self.learn_skill("cure_song", self.cure_song, "回复已损生命值的60%，最多240点。与宁静波纹共享2次总次数。")
+        self.learn_skill("peaceful_wave", self.peaceful_wave, "宁静波纹：消除所有debuff。与治愈歌谣共享2次总次数。")
+        self.learn_skill("rapid_flow", self.rapid_flow, "激流：对敌人造成伤害并使其防御力下降，持续2回合，冷却4回合")
         if level > 1:
             self.gain_levels(level - 1, announce=False)
             self.health = self.maxHP
             self.shield = 0
             self.water_shield_cooldown = 0
-            self.remaining_songs = 2
+            self.rapid_flow_cooldown = 0
+            self.support_skill_uses = 2
 
     def water_shield(self):
         if self.water_shield_cooldown > 0:
             print(f"{self.name} 的水盾仍在冷却中，还需 {self.water_shield_cooldown} 回合！")
             return
     
-        shield_value = int(10 + self.water_control_level * 12 + self.defense * 0.06)
-        self.shield = min(95, shield_value)  #约50级达到95点护盾值上限
+        shield_value = int(30 + self.water_control_level * 9 + self.defense * 0.06)
+        self.shield = min(140, shield_value)  
         self.water_shield_cooldown = 5
         print(f"{self.name} 形成了水盾，获得 {self.shield} 点护盾值！")
 
+    """宁静波纹：消除所有debuff，限用2次"""
+    def peaceful_wave(self):
+        if self.support_skill_uses > 0:
+            self.clear_debuffs(silent=True)
+            self.support_skill_uses -= 1
+            print(f"{self.name} 发出了宁静波纹，所有debuff被消除了！共享剩余次数：{self.support_skill_uses}")
+        else:
+            print(f"治愈歌谣/宁静波纹的共享次数已用完！")
+
     def on_turn_start(self):
+        super().on_turn_start()
         if self.water_shield_cooldown > 0:
             self.water_shield_cooldown -= 1
+        if self.rapid_flow_cooldown > 0:
+            self.rapid_flow_cooldown -= 1
     
     def before_take_damage(self, value, attacker, attack_type):
         if self.shield > 0:
@@ -491,20 +747,35 @@ class Mermaid(Character):
             return remain
         return value
 
+    #激流：对敌人造成伤害并使其防御力下降，持续2回合，冷却4回合
+    def rapid_flow(self, target):
+        if self.rapid_flow_cooldown > 0:
+            print(f"{self.name} 的激流仍在冷却中，还需 {self.rapid_flow_cooldown} 回合！")
+            return
+        damage = int(self.attack * 0.45) // (1 + target.defense*0.7/100)
+        print(f"{self.name} 施放了激流，对 {target.name} 造成 {damage} 点伤害！")
+        self.deal_damage(target, damage)
+        target.apply_defense_down(ratio=0.15, turns=2, source_name="激流")
+        self.rapid_flow_cooldown = 4
+ 
     def cure_song(self):
-        if self.remaining_songs > 0:
+        if self.support_skill_uses > 0:
             heal_value = int(min(240, (self.maxHP - self.health) * 0.6))
             self.health_regeneration(heal_value)  #回复已损失生命值的60%，最多240点
-            self.remaining_songs -= 1
-            print(f"{self.name} 的歌声治愈动人！剩余歌谣次数：{self.remaining_songs}")
+            self.support_skill_uses -= 1
+            print(f"{self.name} 的歌声治愈动人！共享剩余次数：{self.support_skill_uses}")
         else:
-            print(f"治愈歌谣的次数已用完！")
+            print(f"治愈歌谣/宁静波纹的共享次数已用完！")
 
     def is_skill_available(self, skill_name):
         if skill_name == "water_shield":
             return self.water_shield_cooldown == 0
         if skill_name == "cure_song":
-            return self.remaining_songs > 0
+            return self.support_skill_uses > 0
+        if skill_name == "peaceful_wave":
+            return self.support_skill_uses > 0
+        if skill_name == "rapid_flow":
+            return self.rapid_flow_cooldown == 0
         return super().is_skill_available(skill_name)
     
     def level_up(self, announce=True):
@@ -518,42 +789,68 @@ class Mermaid(Character):
         super().settlement()
         self.shield = 0
         self.water_shield_cooldown = 0
-        self.remaining_songs = 2
+        self.support_skill_uses = 2
+        self.rapid_flow_cooldown = 0
+    def get_skill_runtime_info(self):
+        return {
+            "water_shield": f"cd={self.water_shield_cooldown}",
+            "cure_song": f"remaining={self.support_skill_uses} (shared)",
+            "peaceful_wave": f"remaining={self.support_skill_uses} (shared)",
+            "rapid_flow": f"cd={self.rapid_flow_cooldown}",
+        }
 
 class WolfMan(Character):
     def __init__(self, name, level = 1, maxHP = 235, attack = 85, defense = 25):
         super().__init__(name, level, maxHP, attack, defense)
         self.wolf_evolution_flag = False
         self.bloody_bite_cooldown = 0
+        self.wolf_cry_cooldown = 0
         self.learn_skill("wolf_evolution", self.wolf_evolution, "生命值较低时可进入狼化形态，普攻更易穿透防御。")
         self.learn_skill("bloody_bite", self.bloody_bite, "造成伤害并在目标血量较高时吸血，冷却3回合。")
+        self.learn_skill("wolf_cry", self.wolf_cry, "仅在狼人形态下可用，对敌人造成防御力与攻击力下降，持续2回合，冷却4回合。")
         if level > 1:
             self.gain_levels(level - 1, announce=False)
             self.health = self.maxHP
             self.wolf_evolution_flag = False
             self.bloody_bite_cooldown = 0
+            self.wolf_cry_cooldown = 0
 
     def is_skill_available(self, skill_name):
         if skill_name == "wolf_evolution":
-            return self.health < self.maxHP * 0.4 and not self.wolf_evolution_flag
+            return self.health < self.maxHP * 0.5 and not self.wolf_evolution_flag
         if skill_name == "bloody_bite":
             return self.bloody_bite_cooldown == 0
+        if skill_name == "wolf_cry":
+            return self.wolf_evolution_flag and self.wolf_cry_cooldown == 0
         return super().is_skill_available(skill_name)
 
     def on_turn_start(self):
+        super().on_turn_start()
         if self.bloody_bite_cooldown > 0:
             self.bloody_bite_cooldown -= 1
+        if self.wolf_cry_cooldown > 0:
+            self.wolf_cry_cooldown -= 1
     
     def wolf_evolution(self):
-        if self.health < self.maxHP * 0.4 and self.wolf_evolution_flag == False:
+        if self.health < self.maxHP * 0.5 and self.wolf_evolution_flag == False:
             print(f"{self.name} 进入狼人形态！攻击将部分无视防御！")
             self.wolf_evolution_flag = True
         else:
             print(f"{self.name} 无法进入狼人形态！")
 
+    """狼嚎：仅在狼人形态下可用，对敌人造成防御力与攻击力下降，持续2回合，冷却4回合"""
+    def wolf_cry(self,target):
+        if self.wolf_evolution_flag:
+            print(f"{self.name} 发出了狼嚎，对 {target.name} 造成了恐怖！{target.name} 的攻击力和防御力下降了！")
+            target.apply_attack_down(ratio=0.15, turns=2, source_name="狼嚎")
+            target.apply_defense_down(ratio=0.25, turns=2, source_name="狼嚎")
+            self.wolf_cry_cooldown = 4
+        else:
+            print(f"{self.name} 只有在狼人形态下才能使用狼嚎！")
+
     def attack_target(self, target):
         if self.wolf_evolution_flag == True:
-            damage = self.attack * 40 // (100 + target.defense*0.4) + 10 # 狼人形态部分无视防御,且增加固定伤害
+            damage = self.attack * 45 // (100 + target.defense*0.4) + 10 # 狼人形态部分无视防御,且增加固定伤害
             print(f"{self.name} 狼化攻击了 {target.name}，造成 {int(damage)} 点伤害！")
             self.deal_damage(target, damage)
         else:
@@ -569,7 +866,7 @@ class WolfMan(Character):
         self.bloody_bite_cooldown = 3
         if target_hp_ratio_before > 0.4:
             if actual_damage > 0:
-                bite_heal = int(actual_damage * 0.5)  # 吸取实际造成伤害的50%作为生命回复
+                bite_heal = int(actual_damage * 0.6)  # 吸取实际造成伤害的60%作为生命回复
                 if bite_heal > 0:
                     print(f"{self.name} 使用血腥之咬，对 {target.name} 造成了 {actual_damage} 点伤害，并吸取了 {bite_heal} 点生命值！")
                     self.health_regeneration(bite_heal)
@@ -587,6 +884,19 @@ class WolfMan(Character):
         super().settlement()
         self.wolf_evolution_flag = False
         self.bloody_bite_cooldown = 0
+        self.wolf_cry_cooldown = 0
+
+    def get_runtime_status(self):
+        data = super().get_runtime_status()
+        if self.wolf_evolution_flag:
+            data["buffs"].append("wolf_form")
+        return data
+
+    def get_skill_runtime_info(self):
+        return {
+            "bloody_bite": f"cd={self.bloody_bite_cooldown}",
+            "wolf_cry": f"cd={self.wolf_cry_cooldown}",
+        }
 
 class Druid(Character):
     def __init__(self, name, level = 1, maxHP = 205, attack = 85, defense = 15):
@@ -650,6 +960,7 @@ class Druid(Character):
         print(f"{self.name} 受到了树灵的佑护，防御力暂时提高了 {self.tree_spirit_blessing_defense_bonus} 点！")
 
     def on_turn_start(self):
+        super().on_turn_start()
         if self.tree_spirit_blessing_cooldown > 0:
             self.tree_spirit_blessing_cooldown -= 1
         if self.tree_spirit_blessing_active:
@@ -722,3 +1033,121 @@ class Druid(Character):
         self.tree_spirit_blessing_cooldown = 0
         self.tree_spirit_blessing_defense_bonus = 0
         self.treant_max_hp = int(self.maxHP * 0.2)
+
+    def get_runtime_status(self):
+        data = super().get_runtime_status()
+        if self.tree_spirit_blessing_active:
+            data["buffs"].append(f"tree_blessing({self.tree_spirit_blessing_turns})")
+        if self.summons_on_field:
+            data["buffs"].append("summons:" + ",".join(self.summons_on_field))
+        return data
+
+    def get_skill_runtime_info(self):
+        return {
+            "nature_summon": f"remaining={self.nature_summon_limit - self.nature_summon_count}",
+            "tree_spirit_blessing": f"cd={self.tree_spirit_blessing_cooldown}",
+        }
+
+class SnowElf(Character):
+    def __init__(self, name, level = 1, maxHP = 200, attack = 90, defense = 15):
+        super().__init__(name, level, maxHP, attack, defense)
+        self.ice_arrow_active_attacks = 0
+        self.ice_arrow_cooldown = 0
+        self.blizzard_used = False
+        self.frost_spear_cooldown = 0
+        self.learn_skill("ice_arrow", self.ice_arrow, "冰晶箭矢：强化接下来的2次普攻，伤害提高并有30%概率冻结目标1回合，冷却4回合。")
+        self.learn_skill("blizzard", self.blizzard, "暴风雪：在场上召唤持续3回合的暴风雪，每回合对敌人造成伤害并降低其20%攻击力。每次战斗限1次。")
+        self.learn_skill("frost_spear", self.frost_spear, "寒霜长矛：造成穿透部分防御的伤害，并有70%概率冻结目标1回合，冷却3回合。")
+        if level > 1:
+            self.gain_levels(level - 1, announce=False)
+            self.health = self.maxHP
+            self.ice_arrow_active_attacks = 0
+            self.ice_arrow_cooldown = 0
+            self.blizzard_used = False
+            self.frost_spear_cooldown = 0
+
+    def is_skill_available(self, skill_name):
+        if skill_name == "ice_arrow":
+            return self.ice_arrow_cooldown == 0 and self.ice_arrow_active_attacks == 0
+        if skill_name == "blizzard":
+            return not self.blizzard_used
+        if skill_name == "frost_spear":
+            return self.frost_spear_cooldown == 0
+        return super().is_skill_available(skill_name)
+
+    def on_turn_start(self):
+        super().on_turn_start()
+        if self.ice_arrow_cooldown > 0:
+            self.ice_arrow_cooldown -= 1
+        if self.frost_spear_cooldown > 0:
+            self.frost_spear_cooldown -= 1
+
+    def attack_target(self, target):
+        if self.ice_arrow_active_attacks > 0:
+            damage = self.attack * 40 // (100 + target.defense * 0.8) + 15
+            if damage < 0:
+                damage = 0
+            print(f"{self.name} 射出冰晶箭矢，命中 {target.name}，造成 {int(damage)} 点伤害！")
+            self.deal_damage(target, damage, attack_type="magical")
+            if random.random() < 0.70:
+                target.apply_freeze(1, source_name=self.name)
+            self.ice_arrow_active_attacks -= 1
+            if self.ice_arrow_active_attacks == 0:
+                print(f"{self.name} 的冰晶箭矢效果结束了！")
+            return
+        super().attack_target(target)
+
+    def level_up(self, announce=True):
+        super().level_up(announce)
+        self.maxHP += 14
+        self.attack += 10
+        self.defense += 4
+
+    def settlement(self):
+        super().settlement()
+        self.ice_arrow_active_attacks = 0
+        self.ice_arrow_cooldown = 0
+        self.blizzard_used = False
+        self.frost_spear_cooldown = 0
+
+    def get_skill_runtime_info(self):
+        return {
+            "ice_arrow": f"cd={self.ice_arrow_cooldown}, charges={self.ice_arrow_active_attacks}",
+            "blizzard": f"remaining={0 if self.blizzard_used else 1}",
+            "frost_spear": f"cd={self.frost_spear_cooldown}",
+        }
+
+    def ice_arrow(self, target):
+        if self.ice_arrow_active_attacks > 0:
+            print(f"{self.name} 已处于冰晶箭矢强化状态！")
+            return
+        if self.ice_arrow_cooldown > 0:
+            print(f"{self.name} 的冰晶箭矢仍在冷却中，还需 {self.ice_arrow_cooldown} 回合！")
+            return
+        self.ice_arrow_active_attacks = 2
+        self.ice_arrow_cooldown = 4
+        print(f"{self.name} 凝聚寒冰之力，接下来的 2 次普通攻击将附带冰晶箭矢效果！")
+
+   
+    def blizzard(self, target):
+        if self.blizzard_used:
+            print(f"{self.name} 的暴风雪是限定技，本场战斗已使用过！")
+            return
+        self.blizzard_used = True
+        dot_damage = int(self.attack * 15 // (100 + target.defense * 0.8) + 10)
+        target.apply_attack_down(0.20, 3, source_name=self.name)
+        target.apply_continuous_damage(dot_damage, 3, source=self)
+        print(f"{self.name} 召唤暴风雪，压制了 {target.name}的攻击力！")
+
+    def frost_spear(self, target):
+        if self.frost_spear_cooldown > 0:
+            print(f"{self.name} 的寒霜长矛仍在冷却中，还需 {self.frost_spear_cooldown} 回合！")
+            return
+        damage = int(self.attack * 45 // (100 + target.defense * 0.6) + 15)
+        if damage < 0:
+            damage = 0
+        print(f"{self.name} 投掷寒霜长矛，命中 {target.name}，造成 {damage} 点伤害！")
+        self.deal_damage(target, damage, attack_type="magical")
+        if random.random() < 0.30:
+            target.apply_freeze(1, source_name=self.name)
+        self.frost_spear_cooldown = 4

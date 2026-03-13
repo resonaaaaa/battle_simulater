@@ -16,6 +16,7 @@ CHARACTER_TYPES = {
     "Mermaid": battle_character.Mermaid,
     "WolfMan": battle_character.WolfMan,
     "Druid": battle_character.Druid,
+    "SnowElf": battle_character.SnowElf,
 }
 
 
@@ -109,29 +110,31 @@ class BattleApp(tk.Tk):
 
         status_panel = ttk.LabelFrame(battle_area, text="角色状态")
         status_panel.grid(row=0, column=1, sticky="ns")
-
-        self.p1_status_var = tk.StringVar(value="未开始战斗")
-        self.p2_status_var = tk.StringVar(value="未开始战斗")
+        status_panel.rowconfigure(0, weight=1)
+        status_panel.rowconfigure(1, weight=1)
+        status_panel.columnconfigure(0, weight=1)
 
         p1_status_frame = ttk.LabelFrame(status_panel, text="左侧角色")
         p1_status_frame.grid(row=0, column=0, padx=8, pady=(8, 4), sticky="ew")
-        ttk.Label(
-            p1_status_frame,
-            textvariable=self.p1_status_var,
-            justify="left",
-            anchor="w",
-            width=34,
-        ).grid(row=0, column=0, padx=8, pady=8, sticky="w")
+        p1_status_frame.columnconfigure(0, weight=1)
+        p1_status_frame.rowconfigure(0, weight=1)
+        self.p1_status_text = tk.Text(p1_status_frame, wrap="word", width=36, height=10, font=("Consolas", 10))
+        self.p1_status_text.grid(row=0, column=0, padx=(8, 0), pady=8, sticky="nsew")
+        p1_scroll = ttk.Scrollbar(p1_status_frame, orient="vertical", command=self.p1_status_text.yview)
+        p1_scroll.grid(row=0, column=1, padx=(0, 8), pady=8, sticky="ns")
+        self.p1_status_text.configure(yscrollcommand=p1_scroll.set)
+        self.p1_status_text.configure(state="disabled")
 
         p2_status_frame = ttk.LabelFrame(status_panel, text="右侧角色")
         p2_status_frame.grid(row=1, column=0, padx=8, pady=(4, 8), sticky="ew")
-        ttk.Label(
-            p2_status_frame,
-            textvariable=self.p2_status_var,
-            justify="left",
-            anchor="w",
-            width=34,
-        ).grid(row=0, column=0, padx=8, pady=8, sticky="w")
+        p2_status_frame.columnconfigure(0, weight=1)
+        p2_status_frame.rowconfigure(0, weight=1)
+        self.p2_status_text = tk.Text(p2_status_frame, wrap="word", width=36, height=10, font=("Consolas", 10))
+        self.p2_status_text.grid(row=0, column=0, padx=(8, 0), pady=8, sticky="nsew")
+        p2_scroll = ttk.Scrollbar(p2_status_frame, orient="vertical", command=self.p2_status_text.yview)
+        p2_scroll.grid(row=0, column=1, padx=(0, 8), pady=8, sticky="ns")
+        self.p2_status_text.configure(yscrollcommand=p2_scroll.set)
+        self.p2_status_text.configure(state="disabled")
 
         manual_panel = ttk.LabelFrame(btn_frame, text="手动回合控制")
         manual_panel.grid(row=2, column=0, columnspan=2, sticky="e", pady=(8, 0))
@@ -153,51 +156,87 @@ class BattleApp(tk.Tk):
         self.clear_log()
 
     def _special_status_lines(self, char):
-        lines = []
-        if hasattr(char, "shield"):
-            lines.append(f"shield: {int(getattr(char, 'shield', 0))}")
+        status_lines = []
+        debuff_lines = []
+        skill_lines = []
+        runtime_status = {}
+        if hasattr(char, "get_runtime_status"):
+            try:
+                runtime_status = char.get_runtime_status() or {}
+            except Exception:
+                runtime_status = {}
+
+        skill_runtime = runtime_status.get("skill_runtime", {}) if isinstance(runtime_status, dict) else {}
+        debuffs = runtime_status.get("debuffs", []) if isinstance(runtime_status, dict) else []
+
+        # 角色独立状态（不属于技能描述）
         if hasattr(char, "rage"):
-            lines.append(f"rage: {int(getattr(char, 'rage', 0))}")
-        if hasattr(char, "rage_flag"):
-            lines.append(f"rage_flag: {bool(getattr(char, 'rage_flag', False))}")
-        if hasattr(char, "rage_buff_turns") and getattr(char, "rage_flag", False):
-            lines.append(f"rage_turns: {int(getattr(char, 'rage_buff_turns', 0))}")
-        if hasattr(char, "MP") and hasattr(char, "maxMP"):
-            lines.append(f"MP: {int(char.MP)}/{int(char.maxMP)}")
-        if hasattr(char, "bat_count"):
-            lines.append(f"bat_count: {int(getattr(char, 'bat_count', 0))}")
+            status_lines.append(f"rage: {int(getattr(char, 'rage', 0))}")
         if hasattr(char, "dragon_breath") and hasattr(char, "max_dragon_breath"):
-            lines.append(
-                f"dragon_breath: {int(char.dragon_breath)}/{int(char.max_dragon_breath)}"
-            )
-        if hasattr(char, "attack_buff_flag"):
-            lines.append(f"attack_buff: {bool(getattr(char, 'attack_buff_flag', False))}")
-        if hasattr(char, "attack_buff_turns") and getattr(char, "attack_buff_flag", False):
-            lines.append(f"attack_buff_turns: {int(getattr(char, 'attack_buff_turns', 0))}")
-        if hasattr(char, "remaining_songs"):
-            lines.append(f"remaining_songs: {int(getattr(char, 'remaining_songs', 0))}")
-        if hasattr(char, "wolf_evolution_flag"):
-            lines.append(f"wolf_form: {bool(getattr(char, 'wolf_evolution_flag', False))}")
-        if hasattr(char, "counterattack_chance"):
-            lines.append(f"counter_chance: {getattr(char, 'counterattack_chance', 0):.0%}")
-        if hasattr(char, "nature_summon_count") and hasattr(char, "nature_summon_limit"):
-            lines.append(
-                f"summon_count: {int(char.nature_summon_count)}/{int(char.nature_summon_limit)}"
-            )
+            status_lines.append(f"dragon_breath: {int(char.dragon_breath)}/{int(char.max_dragon_breath)}")
+        if hasattr(char, "MP") and hasattr(char, "maxMP"):
+            status_lines.append(f"MP: {int(char.MP)}/{int(char.maxMP)}")
+        if hasattr(char, "shield"):
+            status_lines.append(f"shield: {int(getattr(char, 'shield', 0))}")
+        if hasattr(char, "bat_count"):
+            status_lines.append(f"bat_count: {int(getattr(char, 'bat_count', 0))}")
         if hasattr(char, "summons_on_field"):
             summons = ", ".join(char.summons_on_field) if char.summons_on_field else "none"
-            lines.append(f"summons: {summons}")
+            status_lines.append(f"summons: {summons}")
         if hasattr(char, "treant_max_hp") and getattr(char, "summons", {}).get("treant", False):
-            lines.append(f"treant_hp: {int(getattr(char, 'treant_max_hp', 0))}")
-        if hasattr(char, "tree_spirit_blessing_active"):
-            lines.append(
-                f"tree_blessing: {bool(getattr(char, 'tree_spirit_blessing_active', False))}"
-            )
-        if hasattr(char, "tree_spirit_blessing_turns") and getattr(char, "tree_spirit_blessing_active", False):
-            lines.append(
-                f"tree_blessing_turns: {int(getattr(char, 'tree_spirit_blessing_turns', 0))}"
-            )
+            status_lines.append(f"treant_hp: {int(getattr(char, 'treant_max_hp', 0))}")
+
+        # 特殊状态
+        if hasattr(char, "rage_flag") and bool(getattr(char, "rage_flag", False)):
+            status_lines.append(f"state: rage({int(getattr(char, 'rage_buff_turns', 0))})")
+        if hasattr(char, "wolf_evolution_flag") and bool(getattr(char, "wolf_evolution_flag", False)):
+            status_lines.append("state: wolf_form")
+        if hasattr(char, "counterattack_active") and bool(getattr(char, "counterattack_active", False)):
+            status_lines.append(f"state: counter_stance({int(getattr(char, 'counterattack_active_turns', 0))})")
+        if hasattr(char, "tree_spirit_blessing_active") and bool(getattr(char, "tree_spirit_blessing_active", False)):
+            status_lines.append(f"state: tree_blessing({int(getattr(char, 'tree_spirit_blessing_turns', 0))})")
+        if hasattr(char, "attack_buff_flag") and bool(getattr(char, "attack_buff_flag", False)):
+            status_lines.append(f"state: dragon_attack_up({int(getattr(char, 'attack_buff_turns', 0))})")
+
+        # 负面状态明细（有效值，剩余回合）
+        if debuffs:
+            for item in debuffs:
+                debuff_lines.append(str(item))
+
+        if skill_runtime:
+            for skill_name, text in skill_runtime.items():
+                text_str = str(text)
+                # 展示技能冷却与可用次数
+                if any(key in text_str for key in ("cd=", "remaining=", "charges=")):
+                    skill_lines.append(f"{skill_name}: {text_str}")
+
+        lines = []
+        lines.append("[角色状态]")
+        if status_lines:
+            lines.extend(status_lines)
+        else:
+            lines.append("无")
+
+        lines.append("")
+        lines.append("[Debuff明细]")
+        if debuff_lines:
+            lines.extend(debuff_lines)
+        else:
+            lines.append("无")
+
+        lines.append("")
+        lines.append("[技能CD/次数]")
+        if skill_lines:
+            lines.extend(skill_lines)
+        else:
+            lines.append("无技能CD或次数限制")
         return lines
+
+    def _set_status_text(self, widget, text):
+        widget.configure(state="normal")
+        widget.delete("1.0", tk.END)
+        widget.insert("1.0", text)
+        widget.configure(state="disabled")
 
     def _format_skill_description_for_role(self, role_name, preview_name, level):
         try:
@@ -252,12 +291,12 @@ class BattleApp(tk.Tk):
             char2 = self.current_battle.char2
 
         if char1 is None or char2 is None:
-            self.p1_status_var.set("未开始战斗")
-            self.p2_status_var.set("未开始战斗")
+            self._set_status_text(self.p1_status_text, "未开始战斗")
+            self._set_status_text(self.p2_status_text, "未开始战斗")
             return
 
-        self.p1_status_var.set(self._format_status_text(char1, self.p1_role.get()))
-        self.p2_status_var.set(self._format_status_text(char2, self.p2_role.get()))
+        self._set_status_text(self.p1_status_text, self._format_status_text(char1, self.p1_role.get()))
+        self._set_status_text(self.p2_status_text, self._format_status_text(char2, self.p2_role.get()))
 
     def _build_player_panel(self, parent, title, column):
         panel = ttk.LabelFrame(parent, text=title)
@@ -320,6 +359,8 @@ class BattleApp(tk.Tk):
         p2_level = int(self.p2_level.get())
         if p1_level < 1 or p2_level < 1:
             raise ValueError("等级必须大于等于 1")
+        elif p1_level > 60 or p2_level > 60:
+            raise ValueError("等级不能超过 60")
 
         return p1_name, p2_name, p1_level, p2_level
 
@@ -431,13 +472,17 @@ class BattleApp(tk.Tk):
         log_stream = io.StringIO()
         with redirect_stdout(log_stream):
             actor.on_turn_start()
-            if self.verbose_var.get():
-                print(f"\n第 {bs.turn + 1} 回合：{actor.name} 使用了技能 '{call_name}'")
-            try:
-                actor.use_skill(call_name, *args, **kwargs)
-            except Exception as exc:
+            if not actor.can_act():
                 if self.verbose_var.get():
-                    print(f"{actor.name} 无法使用技能 {call_name}：{exc}")
+                    print(f"\n第 {bs.turn + 1} 回合：{actor.name} 因控制效果跳过行动")
+            else:
+                if self.verbose_var.get():
+                    print(f"\n第 {bs.turn + 1} 回合：{actor.name} 使用了技能 '{call_name}'")
+                try:
+                    actor.use_skill(call_name, *args, **kwargs)
+                except Exception as exc:
+                    if self.verbose_var.get():
+                        print(f"{actor.name} 无法使用技能 {call_name}：{exc}")
             bs.turn += 1
 
         logs = log_stream.getvalue()

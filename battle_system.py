@@ -92,6 +92,11 @@ class BattleSystem:
 			actor = self.char1 if self.turn % 2 == 0 else self.char2
 			opponent = self.char2 if actor is self.char1 else self.char1
 			actor.on_turn_start()
+			if not actor.can_act():
+				if verbose:
+					print(f"\n第 {self.turn + 1} 回合：{actor.name} 因控制效果跳过行动")
+				self.turn += 1
+				continue
 			strat = strat1 if actor is self.char1 else strat2
 			strat = strat or default_strategy
 			name, args, kwargs = strat(actor, opponent)
