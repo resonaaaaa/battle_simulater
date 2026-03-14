@@ -445,6 +445,25 @@ class BattleApp(tk.Tk):
 
         actor = bs.char1 if bs.turn % 2 == 0 else bs.char2
         opponent = bs.char2 if actor is bs.char1 else bs.char1
+
+        # 先结算回合开始效果，再展示可用技能
+        log_stream = io.StringIO()
+        with redirect_stdout(log_stream):
+            actor.on_turn_start()
+            if not actor.can_act() and self.verbose_var.get():
+                print(f"\n第 {bs.turn + 1} 回合：{actor.name} 因控制效果跳过行动")
+
+        logs = log_stream.getvalue()
+        if logs.strip():
+            self.append_log(logs)
+
+        if not actor.can_act():
+            bs.turn += 1
+            self.waiting_manual_input = False
+            self._set_manual_controls(False)
+            self._update_status_panel()
+            return
+
         available_skills = actor.get_available_skills()
         if not available_skills:
             available_skills = ["attack"]
@@ -459,23 +478,27 @@ class BattleApp(tk.Tk):
         self._set_manual_controls(True)
         self.waiting_manual_input = True
 
-    def _execute_turn(self, actor, opponent, forced_skill_name=None):
+    def _execute_turn(self, actor, opponent, forced_skill_name=None, turn_started=False):
         bs = self.current_battle
         if bs is None:
             return
 
-        if forced_skill_name is None:
-            call_name, args, kwargs = battle_system.default_strategy(actor, opponent)
-        else:
-            call_name, args, kwargs = battle_system.build_skill_call(actor, forced_skill_name, opponent)
-
         log_stream = io.StringIO()
         with redirect_stdout(log_stream):
-            actor.on_turn_start()
+            if not turn_started:
+                actor.on_turn_start()
             if not actor.can_act():
                 if self.verbose_var.get():
                     print(f"\n第 {bs.turn + 1} 回合：{actor.name} 因控制效果跳过行动")
             else:
+                if forced_skill_name is None:
+                    call_name, args, kwargs = battle_system.default_strategy(actor, opponent)
+                else:
+                    call_name, args, kwargs = battle_system.build_skill_call(actor, forced_skill_name, opponent)
+
+                if not actor.is_skill_available(call_name):
+                    call_name, args, kwargs = battle_system.build_skill_call(actor, "attack", opponent)
+
                 if self.verbose_var.get():
                     print(f"\n第 {bs.turn + 1} 回合：{actor.name} 使用了技能 '{call_name}'")
                 try:
@@ -511,13 +534,15 @@ class BattleApp(tk.Tk):
                     self.manual_actor = actor
                     self.manual_opponent = opponent
                     self._prepare_manual_turn()
-                    return
+                    if self.waiting_manual_input:
+                        return
+                    continue
                 skill_name = manual_skill_name
                 available_skills = actor.get_available_skills()
                 if skill_name not in available_skills:
                     skill_name = "attack"
                 self.waiting_manual_input = False
-                self._execute_turn(actor, opponent, forced_skill_name=skill_name)
+                self._execute_turn(actor, opponent, forced_skill_name=skill_name, turn_started=True)
                 manual_skill_name = None
                 used_manual_skill = True
             elif actor_mode == "manual" and used_manual_skill:

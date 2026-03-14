@@ -26,21 +26,66 @@ def build_skill_call(actor, skill_name, opponent):
 
 
 def default_strategy(actor, opponent):
-	"""
-	默认的技能选择策略函数。它会随机选择一个技能来使用，优先选择非基本攻击技能，但有一定概率直接使用基本攻击。
-	函数会检查所选技能是否需要参数（如对手），如果需要则传递对手作为参数，否则不传递任何参数。
-	最终返回所选技能的名称以及相应的参数。
-	"""
+	"""默认技能选择策略，进行了权重优化。"""
 	available_skills = actor.get_available_skills()
 	if not available_skills:
 		# 理论上不会发生，因为基础 attack 永远可用
 		return "attack", (opponent,), {}
 
 	non_attack = [s for s in available_skills if s != "attack"]
-	if non_attack and random.random() < 0.5:
-		choice = random.choice(non_attack)
-	else:
-		choice = "attack" if "attack" in available_skills else random.choice(available_skills)
+	choice = None
+
+	# Berserker：满足条件时 80% 优先进入狂怒
+	if isinstance(actor, battle_character.Berserker) and "get_into_anger" in available_skills:
+		if random.random() < 0.8:
+			choice = "get_into_anger"
+
+	"""Mermaid：如果有debuff，90% 优先使用宁静波纹；如果没有debuff，则不会使用宁静波纹
+	cure_song的选择权重根据HP变化
+	"""
+	if choice is None and isinstance(actor, battle_character.Mermaid) and "peaceful_wave" in available_skills:
+		has_debuff = bool(actor.get_runtime_status().get("debuffs", []))
+		if has_debuff and random.random() < 0.9:
+			choice = "peaceful_wave"
+		if not has_debuff:
+			non_attack = [sk for sk in non_attack if sk != "peaceful_wave"]
+	if choice is None and isinstance(actor,battle_character.Mermaid) and "cure_song" in available_skills:
+		is_low_hp = bool(actor.health < actor.maxHP * 0.7)
+		if not is_low_hp:
+			non_attack = [sk for sk in non_attack if sk != "cure_song"]
+		elif is_low_hp and random.random() < 0.75:
+			choice = "cure_song"
+		else:
+			non_attack = [sk for sk in non_attack if sk != "cure_song"]
+
+	#vampire 优化：当自身已有蝙蝠且对手HP较低时，召唤蝙蝠的优先级降低,防止傻傻的错过终结机会
+	if choice is None and isinstance(actor, battle_character.Vampire) and "bat_summon" in available_skills:
+		has_bats = bool(actor.get_runtime_status().get("bat_count", 0) > 0)
+		opponent_low_hp = bool(opponent.health < opponent.maxHP * 0.15)
+		if has_bats and opponent_low_hp:
+			non_attack = [sk for sk in non_attack if sk != "bat_summon"]
+
+	#Knight优化：当HP较低时神圣冲击的优先级提高，而高HP时降低优先级
+	if choice is None and isinstance(actor, battle_character.Knight) and "sacred_crash" in available_skills:
+		is_low_hp = bool(actor.health < actor.maxHP * 0.5)
+		if is_low_hp and random.random() < 0.8:
+			choice = "sacred_crash"
+		elif not is_low_hp and random.random() < 0.2:
+			choice = "sacred_crash"
+		else:
+			non_attack = [sk for sk in non_attack if sk != "sacred_crash"]
+
+	# WolfMan：满足条件时 80% 优先狼化
+	if choice is None and isinstance(actor, battle_character.WolfMan) and "wolf_evolution" in available_skills:
+		if random.random() < 0.8:
+			choice = "wolf_evolution"
+
+	# 通用规则：有可用非普攻时，70% 倾向释放非普攻技能
+	if choice is None:
+		if non_attack and random.random() < 0.7:
+			choice = random.choice(non_attack)
+		else:
+			choice = "attack" if "attack" in available_skills else random.choice(available_skills)
 
 	return build_skill_call(actor, choice, opponent)
 
@@ -100,6 +145,8 @@ class BattleSystem:
 			strat = strat1 if actor is self.char1 else strat2
 			strat = strat or default_strategy
 			name, args, kwargs = strat(actor, opponent)
+			if not actor.is_skill_available(name):
+				name, args, kwargs = build_skill_call(actor, "attack", opponent)
 			if verbose:
 				print(f"\n第 {self.turn + 1} 回合：{actor.name} 使用了技能 '{name}'")
 			try:

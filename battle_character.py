@@ -297,7 +297,7 @@ class Berserker(Character):
         if skill_name == "get_into_anger":
             return (not self.rage_flag) and self.rage >= 50
         if skill_name == "unleash_rage":
-            return self.rage_flag and self.rage >= self.unleash_rage_threshold
+            return self.rage_flag and self.rage >= self.unleash_rage_threshold 
         if skill_name == "crazy_strike":
             return self.crazy_strike_cooldown <= 0 and self.rage >= 20
         return super().is_skill_available(skill_name)
@@ -331,7 +331,8 @@ class Berserker(Character):
             print(f"{self.name} 进入狂怒！攻击提高，但防御下降！")
             self.rage -= 50
             self.rage_flag = True
-            self.rage_buff_turns = 3    
+            # 狂怒回合在回合开始时递减，这里补 1 以保证可完整行动 3 次
+            self.rage_buff_turns = 4
         else:
             print(f"{self.name} 怒气不足，无法进入狂怒状态！")
 
@@ -339,7 +340,7 @@ class Berserker(Character):
         if self.rage < 20:
             print(f"{self.name} 怒气不足，无法使用狂暴重击！")
             return
-        damage = int(self.attack * 0.45) // (1 + target.defense*0.6/100)
+        damage = int(self.attack * 0.4) // (1 + target.defense*0.6/100)
         if damage < 0:
             damage = 0
         if random.random() < 0.2:
@@ -355,7 +356,7 @@ class Berserker(Character):
 
     def unleash_rage(self, target):
         if self.rage_flag and self.rage >= self.unleash_rage_threshold:
-            damage = int(self.attack * 0.5 + 2 * self.rage) // (1 + target.defense*0.8/100)  # 狂怒释放伤害根据当前攻击力和怒气值计算
+            damage = int(self.attack * 0.3 + 2 * self.rage) // (1 + target.defense*0.8/100)  # 狂怒释放伤害根据当前攻击力和怒气值计算
             self.rage = 0
             self.rage_flag = False
             if damage < 0:
@@ -412,14 +413,14 @@ class Vampire(Character):
     def attack_target(self, target):
         damage = (self.attack * 40) // (100 + target.defense*0.8)
         print(f"{self.name} 攻击了 {target.name}，造成 {damage} 点伤害！")
-        bat_damage = (self.bat_count * self.attack * 0.1) * 44 // (100 + target.defense*0.6) # 每只蝙蝠增加10%攻击力的伤害，且略微穿透防御
+        bat_damage = (self.bat_count * self.attack * 0.1) * 40 // (100 + target.defense*0.6) # 每只蝙蝠增加10%攻击力的伤害，且略微穿透防御
         print(f"{self.name} 的蝙蝠追加了 {bat_damage} 点伤害！")
         damage += int(bat_damage)
         if damage < 0:
             damage = 0
         actual_damage = self.deal_damage(target, damage)
         if actual_damage > 0:
-            blood_sucked = int(actual_damage * 0.35) + 15 + int(self.blood_sucking_level * 2.5)
+            blood_sucked = int(actual_damage * 0.35) + 15 + int(self.blood_sucking_level * 2)
             print(f"{self.name} 吸血恢复了 {blood_sucked} 点生命值!")
             self.health_regeneration(blood_sucked)
 
@@ -432,13 +433,13 @@ class Vampire(Character):
             print(f"{self.name} 的蝙蝠数量已达到上限！")
     
     def bat_bomb(self, target):
-        if self.bat_count > 0:
-            damage = int((self.bat_count * self.attack * 0.45) // (1 + target.defense*0.80/100)) + 12 * self.bat_count  # 每只蝙蝠造成45%攻击力的伤害，且穿透防御，外加每只蝙蝠12点固定伤害
+        if self.bat_count > 1:
+            damage = int((self.bat_count * self.attack * 0.35) // (1 + target.defense*0.80/100)) + 12 * self.bat_count  # 每只蝙蝠造成45%攻击力的伤害，且穿透防御，外加每只蝙蝠12点固定伤害
             print(f"{self.name} 引爆了 {self.bat_count} 只蝙蝠，对 {target.name} 造成 {damage} 点伤害！")
             self.deal_damage(target,value=damage, attack_type="magical")
             self.bat_count = 0
         else:
-            print(f"{self.name} 没有蝙蝠可用来引爆！")
+            print(f"{self.name} 没有足够多的蝙蝠可用来引爆！")
 
     def level_up(self, announce=True):
         super().level_up(announce=announce)
@@ -602,7 +603,8 @@ class DragonHuman(Character):
             if not self.attack_buff_flag:
                 self.attack = int(self.attack * 1.2)  # 暂时提高攻击力
                 self.attack_buff_flag = True
-            self.attack_buff_turns = 2
+            # 由于在回合开始递减计数，这里补 1，确保体感为 2 次自身行动回合
+            self.attack_buff_turns = 3
             self.deal_damage(target, damage, attack_type="magical")
         else:
             print("龙息值不足，无法释放龙息攻击！")
@@ -759,7 +761,7 @@ class Mermaid(Character):
         damage = int(self.attack * 0.30) // (1 + target.defense*0.8/100) + 4 * (self.water_control_level + 10)
         print(f"{self.name} 施放了激流，对 {target.name} 造成 {damage} 点伤害！")
         self.deal_damage(target, damage)
-        target.apply_defense_down(ratio=0.40, turns=2, source_name="激流")
+        target.apply_defense_down(ratio=0.25, turns=2, source_name="激流")
         self.rapid_flow_cooldown = 4
  
     def cure_song(self):
@@ -957,10 +959,10 @@ class Druid(Character):
         if self.tree_spirit_blessing_cooldown > 0:
             print(f"{self.name} 的树灵佑护仍在冷却中，还需 {self.tree_spirit_blessing_cooldown} 回合！")
             return
-        self.tree_spirit_blessing_defense_bonus = int(self.defense * 0.4 + 48)
+        self.tree_spirit_blessing_defense_bonus = int(self.defense * 0.3 + 48)
         self.defense += self.tree_spirit_blessing_defense_bonus
         self.tree_spirit_blessing_active = True
-        self.tree_spirit_blessing_turns = 3  # 树灵佑护持续3回合
+        self.tree_spirit_blessing_turns = 4
         self.tree_spirit_blessing_cooldown = 5
         print(f"{self.name} 受到了树灵的佑护，防御力暂时提高了 {self.tree_spirit_blessing_defense_bonus} 点！")
 
