@@ -198,6 +198,8 @@ class Character:
         ratio = max(0.0, float(ratio))
         if turns <= 0 or ratio <= 0:
             return
+        # defense_down 通常在受击后附加，为避免在目标下个回合开始就提前损耗，内部额外补 1 回合
+        effective_turns = turns + 1
         # 先撤销旧防御降低，再按当前防御重新计算，避免叠减失真
         if self.defense_down_value > 0:
             self.defense += self.defense_down_value
@@ -206,7 +208,7 @@ class Character:
         down_value = min(down_value, max(0, self.defense - 1))
         self.defense -= down_value
         self.defense_down_value = down_value
-        self.defense_down_turns = turns
+        self.defense_down_turns = effective_turns
         self.defense_down_source = source_name
         print(f"{self.name} 的防御被压制，降低了 {down_value} 点，持续 {turns} 回合！")
 
@@ -693,23 +695,25 @@ class FlameWitch(Character):
         self.shield = 0
 
 class Mermaid(Character):
-    def __init__(self, name, level = 1, maxHP = 260, attack = 80, defense = 30):
+    def __init__(self, name, level = 1, maxHP = 240, attack = 75, defense = 30):
         super().__init__(name, level, maxHP, attack, defense)
         self.water_control_level = 1 + (level - 1) // 5
         self.shield = 0
         self.water_shield_cooldown = 0
         self.rapid_flow_cooldown = 0
+        self.cure_song_cooldown = 0
         self.support_skill_uses = 2
         self.learn_skill("water_shield", self.water_shield, "生成水盾优先吸收伤害，冷却5回合。")
-        self.learn_skill("cure_song", self.cure_song, "回复已损生命值的60%，最多240点。与宁静波纹共享2次总次数。")
+        self.learn_skill("cure_song", self.cure_song, "回复已损生命值的60%，最多180点，冷却5回合。与宁静波纹共享2次总次数。")
         self.learn_skill("peaceful_wave", self.peaceful_wave, "宁静波纹：消除所有debuff。与治愈歌谣共享2次总次数。")
-        self.learn_skill("rapid_flow", self.rapid_flow, "激流：对敌人造成伤害并使其防御力下降，持续2回合，冷却4回合")
+        self.learn_skill("rapid_flow", self.rapid_flow, "激流：对敌人造成更高伤害并使其防御力显著下降，持续2回合，冷却4回合")
         if level > 1:
             self.gain_levels(level - 1, announce=False)
             self.health = self.maxHP
             self.shield = 0
             self.water_shield_cooldown = 0
             self.rapid_flow_cooldown = 0
+            self.cure_song_cooldown = 0
             self.support_skill_uses = 2
 
     def water_shield(self):
@@ -717,8 +721,8 @@ class Mermaid(Character):
             print(f"{self.name} 的水盾仍在冷却中，还需 {self.water_shield_cooldown} 回合！")
             return
     
-        shield_value = int(30 + self.water_control_level * 9 + self.defense * 0.06)
-        self.shield = min(140, shield_value)  
+        shield_value = int(24 + self.water_control_level * 7 + self.defense * 0.05)
+        self.shield = min(95, shield_value)
         self.water_shield_cooldown = 5
         print(f"{self.name} 形成了水盾，获得 {self.shield} 点护盾值！")
 
@@ -752,26 +756,27 @@ class Mermaid(Character):
         if self.rapid_flow_cooldown > 0:
             print(f"{self.name} 的激流仍在冷却中，还需 {self.rapid_flow_cooldown} 回合！")
             return
-        damage = int(self.attack * 0.45) // (1 + target.defense*0.7/100)
+        damage = int(self.attack * 0.30) // (1 + target.defense*0.8/100) + 4 * (self.water_control_level + 10)
         print(f"{self.name} 施放了激流，对 {target.name} 造成 {damage} 点伤害！")
         self.deal_damage(target, damage)
-        target.apply_defense_down(ratio=0.15, turns=2, source_name="激流")
+        target.apply_defense_down(ratio=0.40, turns=2, source_name="激流")
         self.rapid_flow_cooldown = 4
  
     def cure_song(self):
-        if self.support_skill_uses > 0:
-            heal_value = int(min(240, (self.maxHP - self.health) * 0.6))
-            self.health_regeneration(heal_value)  #回复已损失生命值的60%，最多240点
+        if self.support_skill_uses > 0 and self.health < self.maxHP and self.cure_song_cooldown == 0:
+            heal_value = int(min(180, (self.maxHP - self.health) * 0.6))
+            self.health_regeneration(heal_value)  #回复已损失生命值的60%，最多180点
             self.support_skill_uses -= 1
+            self.cure_song_cooldown = 5
             print(f"{self.name} 的歌声治愈动人！共享剩余次数：{self.support_skill_uses}")
         else:
-            print(f"治愈歌谣/宁静波纹的共享次数已用完！")
+            print(f"治愈歌谣/宁静波纹的共享次数已用完或正在冷却中！")
 
     def is_skill_available(self, skill_name):
         if skill_name == "water_shield":
             return self.water_shield_cooldown == 0
         if skill_name == "cure_song":
-            return self.support_skill_uses > 0
+            return self.support_skill_uses > 0 and self.cure_song_cooldown == 0
         if skill_name == "peaceful_wave":
             return self.support_skill_uses > 0
         if skill_name == "rapid_flow":
