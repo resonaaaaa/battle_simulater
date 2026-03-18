@@ -90,7 +90,7 @@ class Character:
 
         # 冻结：冻结期间无法行动
         if self.frozen_turns > 0:
-            print(f"{self.name} 被冻结，无法行动！")
+            print(f"{self.name} 无法行动！")
             self.frozen_turns -= 1
             self.skip_turn = True
 
@@ -166,15 +166,24 @@ class Character:
         if not silent:
             print(f"{self.name} 身上的负面状态已被清除。")
 
-    def apply_freeze(self, turns=1, source_name=""):
+    def apply_freeze(self, turns=1, source=None, type_name=''):
         turns = int(max(0, turns))
         if turns <= 0:
             return
         self.frozen_turns = max(self.frozen_turns, turns)
-        if source_name:
+        if source is None:
+            source_name = "未知"
+        elif hasattr(source, "name"):
+            source_name = source.name
+        else:
+            source_name = str(source)
+
+        if type_name == "numbness":
+            print(f"{self.name} 被 {source_name} 麻痹了 {turns} 回合！")
+        elif type_name == 'freeze':
             print(f"{self.name} 被 {source_name} 冻结了 {turns} 回合！")
         else:
-            print(f"{self.name} 被冻结了 {turns} 回合！")
+            print(f"{self.name} 因 {source_name} 而无法行动 {turns} 回合！")
 
     def apply_attack_down(self, ratio, turns, source_name=""):
         turns = int(max(0, turns))
@@ -1097,7 +1106,7 @@ class SnowElf(Character):
             print(f"{self.name} 射出冰晶箭矢，命中 {target.name}，造成 {int(damage)} 点伤害！")
             self.deal_damage(target, damage, attack_type="magical")
             if random.random() < 0.70:
-                target.apply_freeze(1, source_name=self.name)
+                target.apply_freeze(1, source=self, type_name='freeze')
             self.ice_arrow_active_attacks -= 1
             if self.ice_arrow_active_attacks == 0:
                 print(f"{self.name} 的冰晶箭矢效果结束了！")
@@ -1156,5 +1165,138 @@ class SnowElf(Character):
         print(f"{self.name} 投掷寒霜长矛，命中 {target.name}，造成 {damage} 点伤害！")
         self.deal_damage(target, damage, attack_type="magical")
         if random.random() < 0.30:
-            target.apply_freeze(1, source_name=self.name)
+            target.apply_freeze(1, source=self, type_name='freeze')
         self.frost_spear_cooldown = 4
+
+
+class ThunderWizard(Character):
+    def __init__(self, name, level = 1, maxHP = 190, attack = 95, defense = 10):
+        super().__init__(name, level, maxHP, attack, defense)
+        self.maxMP = 50
+        self.MP = self.maxMP
+        self.static_field_cooldown = 0
+        self.ball_lightning_cooldown = 0
+        self.thunder_strike_cooldown = 0
+        self.static_field_turns = 0
+        self.thunder_strike_turns = 0
+        self.learn_skill("static_field", self.static_field, "生成一个静电场，少量提高防御，且当受到敌人攻击时，概率麻痹敌人，下回合将无法行动，冷却5回合，消耗15MP")
+        self.learn_skill("ball_lightning", self.ball_lightning, "球状闪电：对敌人造成伤害，概率分裂成多个小闪电造成额外攻击，冷却2回合，消耗15MP")
+        self.learn_skill("thunder_strike", self.thunder_strike, "雷霆一击：对敌人造成大量伤害，给自身附加带电效果3回合，在攻击时会造成额外伤害，冷却3回合，消耗20MP")
+        if level > 1:
+            self.gain_levels(level - 1, announce=False)
+            self.health = self.maxHP
+            self.MP = self.maxMP
+
+    def is_skill_available(self, skill_name):
+        if skill_name == "static_field":
+            return self.MP >= 15 and self.static_field_cooldown == 0
+        if skill_name == "ball_lightning":
+            return self.MP >= 15 and self.ball_lightning_cooldown == 0
+        if skill_name == "thunder_strike":
+            return self.MP >= 20 and self.thunder_strike_cooldown == 0
+        return super().is_skill_available(skill_name)
+    
+    def on_turn_start(self):
+        super().on_turn_start()
+        if self.static_field_cooldown > 0:
+            self.static_field_cooldown -= 1
+        if self.ball_lightning_cooldown > 0:
+            self.ball_lightning_cooldown -= 1
+        if self.thunder_strike_cooldown > 0:
+            self.thunder_strike_cooldown -= 1
+        if self.static_field_turns > 0:
+            self.static_field_turns -= 1
+            if self.static_field_turns == 0:
+                print(f"{self.name} 的静电场效果结束了！")
+                self.defense -= int(15 + self.level)  # 静电场结束时降低之前提升的防御
+        if self.thunder_strike_turns > 0:
+            self.thunder_strike_turns -= 1
+            if self.thunder_strike_turns == 0:
+                print(f"{self.name} 的带电效果结束了！")
+
+    def before_take_damage(self, value, attacker, attack_type):
+        if attack_type != "counterattack" and self.static_field_turns > 0:
+            if random.random() < 0.4:  # 40%概率触发麻痹
+                # 触发麻痹于攻击者；使用 source=self 以便打印来源名称并避免重复信息
+                if attacker is not None and hasattr(attacker, 'apply_freeze'):
+                    attacker.apply_freeze(1, source=self, type_name="numbness")
+        return value
+    
+    def attack_target(self, target):
+        super().attack_target(target)
+        if self.thunder_strike_turns > 0:
+            extra_damage = int(target.health * 0.03) + 10  # 带电效果造成额外伤害，基于目标当前生命值的3%加上固定值 
+            print(f"{self.name} 的带电效果造成了额外 {extra_damage} 点伤害！")
+            self.deal_damage(target, extra_damage, attack_type="magical")
+
+
+    def static_field(self):
+        if self.MP < 15:
+            print(f"{self.name} 法力不足，无法施放静电场！")
+            return
+        if self.static_field_cooldown > 0:
+            print(f"{self.name} 的静电场仍在冷却中，还需 {self.static_field_cooldown} 回合！")
+            return
+        self.MP -= 15
+        self.static_field_turns = 3
+        self.static_field_cooldown = 5
+        self.defense += int(15 + self.level)  # 提高防御
+        print(f"{self.name} 生成了一个静电场，持续3回合！受到攻击时有概率麻痹敌人！")
+
+    def ball_lightning(self,target):
+        if self.MP < 15:
+            print(f"{self.name} 法力不足，无法施放球状闪电！")
+            return
+        if self.ball_lightning_cooldown > 0:
+            print(f"{self.name} 的球状闪电仍在冷却中，还需 {self.ball_lightning_cooldown} 回合！")
+            return
+        self.MP -= 15
+        damage = int(self.attack * 35 // (100 + target.defense * 0.8) + 10)
+        print(f"{self.name} 施放了球状闪电，命中 {target.name}，造成 {damage} 点伤害！")
+        self.deal_damage(target, damage, attack_type="magical")
+        if random.random() < 0.6:  # 60%概率分裂成小闪电
+            extra_attacks = random.randint(2, 4)  # 分裂成2-4个小闪电
+            print(f"{self.name} 的球状闪电分裂成了 {extra_attacks} 个小闪电！")
+            extra_damage = extra_attacks * 8  # 每个小闪电造成8点伤害
+            self.deal_damage(target, extra_damage, attack_type="magical")
+        self.ball_lightning_cooldown = 2
+            
+    def thunder_strike(self,target):
+        if self.MP < 20:
+            print(f"{self.name} 法力不足，无法施放雷霆一击！")
+            return
+        if self.thunder_strike_cooldown > 0:
+            print(f"{self.name} 的雷霆一击仍在冷却中，还需 {self.thunder_strike_cooldown} 回合！")
+            return
+        self.MP -= 20
+        damage = int(self.attack * 50 // (100 + target.defense * 0.8) + 20)
+        print(f"{self.name} 施放了雷霆一击，命中 {target.name}，造成 {damage} 点伤害！")
+        self.deal_damage(target, damage)
+        self.thunder_strike_turns = 3
+        self.thunder_strike_cooldown = 3
+        print(f"{self.name} 进入了带电状态，持续3回合！攻击时会造成额外伤害！")
+
+    def get_skill_runtime_info(self):
+        return {
+            "static_field": f"cd={getattr(self, 'static_field_cooldown', 0)}, turns={getattr(self, 'static_field_turns', 0)}",
+            "ball_lightning": f"cd={getattr(self, 'ball_lightning_cooldown', 0)}",
+            "thunder_strike": f"cd={getattr(self, 'thunder_strike_cooldown', 0)}, turns={getattr(self, 'thunder_strike_turns', 0)}",
+        }
+
+    def settlement(self):
+        super().settlement()
+        # 重置法力与技能相关状态
+        self.MP = getattr(self, 'maxMP', getattr(self, 'MP', 0))
+        self.static_field_cooldown = 0
+        self.ball_lightning_cooldown = 0
+        self.thunder_strike_cooldown = 0
+        self.static_field_turns = 0
+        self.thunder_strike_turns = 0
+
+    def level_up(self, announce=True):
+        super().level_up(announce)
+        self.maxHP += 12
+        self.attack += 11
+        self.defense += 3
+        self.maxMP += 2
+        self.MP = self.maxMP

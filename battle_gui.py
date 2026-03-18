@@ -17,6 +17,7 @@ CHARACTER_TYPES = {
     "WolfMan": battle_character.WolfMan,
     "Druid": battle_character.Druid,
     "SnowElf": battle_character.SnowElf,
+    "ThunderWizard": battle_character.ThunderWizard,
 }
 
 
@@ -197,7 +198,11 @@ class BattleApp(tk.Tk):
             status_lines.append(f"state: tree_blessing({int(getattr(char, 'tree_spirit_blessing_turns', 0))})")
         if hasattr(char, "attack_buff_flag") and bool(getattr(char, "attack_buff_flag", False)):
             status_lines.append(f"state: dragon_attack_up({int(getattr(char, 'attack_buff_turns', 0))})")
-
+        if hasattr(char,"static_field_turns") and getattr(char,"static_field_turns", 0) > 0:
+            status_lines.append(f"state: static_field({int(getattr(char, 'static_field_turns', 0))})")
+        if hasattr(char, "thunder_strike_turns") and getattr(char, "thunder_strike_turns", 0) > 0:
+            status_lines.append(f"state: charged({int(getattr(char, 'thunder_strike_turns', 0))})")
+            
         # 负面状态明细（有效值，剩余回合）
         if debuffs:
             for item in debuffs:
